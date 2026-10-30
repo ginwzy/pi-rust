@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use pi_ai::{ContentBlock, Message, UserContent, UserMessage};
+use tokio_util::sync::CancellationToken;
 
 use super::builtins::mcp::set_servers_section;
 use super::{AgentSession, lock};
@@ -45,9 +46,24 @@ impl PromptDisposition {
     }
 }
 
+/// The input was cancelled before admission; extension side effects are not rolled back.
+#[derive(Debug, thiserror::Error)]
+#[error("Prompt cancelled before admission")]
+pub struct PromptCancelled;
+
+fn check_cancelled(cancel: Option<&CancellationToken>) -> anyhow::Result<()> {
+    if cancel.is_some_and(CancellationToken::is_cancelled) {
+        return Err(PromptCancelled.into());
+    }
+    Ok(())
+}
+
 /// Options of [`AgentSession::prompt_with`].
 #[derive(Clone)]
 pub struct PromptOptions {
+    /// Cancel this input before admission. Checked after preparation awaits; does not terminate
+    /// JavaScript or abort an admitted run. Use `request_abort` to stop execution after admission.
+    pub cancel: Option<CancellationToken>,
     /// Expand `/skill:name` and prompt templates (default true).
     pub expand_prompt_templates: bool,
     pub images: Vec<ContentBlock>,
@@ -63,6 +79,7 @@ pub struct PromptOptions {
 impl Default for PromptOptions {
     fn default() -> Self {
         Self {
+            cancel: None,
             expand_prompt_templates: true,
             images: Vec::new(),
             streaming_behavior: None,
@@ -128,12 +145,15 @@ impl AgentSession {
     }
 
     pub async fn prompt_with(&self, text: &str, options: PromptOptions) -> anyhow::Result<PromptDisposition> {
+        check_cancelled(options.cancel.as_ref())?;
         let source = options.source.clone().unwrap_or_else(|| "interactive".into());
         if source != "extension" {
             self.wait_extensions_bound().await;
         }
+        check_cancelled(options.cancel.as_ref())?;
         // Extension commands run first, even while streaming; they send their own messages.
         if options.expand_prompt_templates && text.starts_with('/') && self.try_extension_command(text).await? {
+            check_cancelled(options.cancel.as_ref())?;
             if let Some(callback) = &options.preflight_result {
                 callback(PromptDisposition::Handled);
             }
@@ -149,6 +169,7 @@ impl AgentSession {
                 callback(disposition);
             }
         };
+        check_cancelled(options.cancel.as_ref())?;
         if options.expand_prompt_templates
             && let Some(args) = mcp_command_args(text)
             && self.mcp_manager().is_some()
@@ -159,13 +180,15 @@ impl AgentSession {
         }
         let from_extension = source == "extension";
         let behavior = if self.is_streaming() { options.streaming_behavior } else { None };
-        let Some((text, input_images)) = self.run_input_handlers(text, options.images.clone(), &source, behavior).await
-        else {
+        let input = self.run_input_handlers(text, options.images.clone(), &source, behavior).await;
+        check_cancelled(options.cancel.as_ref())?;
+        let Some((text, input_images)) = input? else {
             preflight(PromptDisposition::Handled);
             return Ok(PromptDisposition::Handled);
         };
         let text = text.as_str();
         let expanded = if options.expand_prompt_templates { self.expand_input(text) } else { text.to_string() };
+        check_cancelled(options.cancel.as_ref())?;
         if self.is_streaming() {
             let Some(behavior) = options.streaming_behavior else {
                 anyhow::bail!(
@@ -181,8 +204,9 @@ impl AgentSession {
             return Ok(PromptDisposition::Handled);
         }
         self.ensure_auth().await?;
+        check_cancelled(options.cancel.as_ref())?;
         let trigger = RunTrigger::User { prompt: expanded, images: input_images, from_extension };
-        self.start_run(trigger, || preflight(PromptDisposition::Started)).await?;
+        self.start_run(trigger, options.cancel.as_ref(), || preflight(PromptDisposition::Started)).await?;
         Ok(PromptDisposition::Started)
     }
 
@@ -190,7 +214,12 @@ impl AgentSession {
     /// while `before_agent_start` handlers run join this run, and an abort requested meanwhile
     /// aborts the run as soon as it exists (upstream `_startRun`). `on_started` runs once the
     /// run's messages are prepared.
-    pub(crate) async fn start_run(&self, trigger: RunTrigger, on_started: impl FnOnce()) -> anyhow::Result<()> {
+    pub(crate) async fn start_run(
+        &self,
+        trigger: RunTrigger,
+        cancel: Option<&CancellationToken>,
+        on_started: impl FnOnce(),
+    ) -> anyhow::Result<()> {
         {
             let mut state = lock(&self.state);
             state.abort_requested = false;
@@ -198,7 +227,14 @@ impl AgentSession {
         }
         self.file_checkpoints.begin_prompt(&self.session_id());
         self.notify_idle();
-        let messages = self.prepare_run(&trigger).await;
+        let messages = match self.prepare_run(&trigger, cancel).await {
+            Ok(messages) => messages,
+            Err(error) => {
+                lock(&self.state).run_active = false;
+                self.notify_idle();
+                return Err(error);
+            }
+        };
         // Messages held while the run was starting go before its starting messages, as they would
         // have while idle. No run exists yet, so they cannot split a tool call from its result.
         self.flush_pending_bash_messages();
@@ -211,7 +247,11 @@ impl AgentSession {
     /// apply the run's prompt options and tool loadout, and build the starting message followed
     /// by pending `nextTurn` messages (consumed here) and handler messages, with a system patch
     /// first when the prompt changed (upstream `_prepareRun`).
-    async fn prepare_run(&self, trigger: &RunTrigger) -> Vec<Message> {
+    async fn prepare_run(
+        &self,
+        trigger: &RunTrigger,
+        cancel: Option<&CancellationToken>,
+    ) -> anyhow::Result<Vec<Message>> {
         let last_assistant = self.with_state(|state| {
             state.messages.iter().rev().find_map(|message| match message {
                 Message::Assistant(assistant) => Some(assistant.clone()),
@@ -228,11 +268,15 @@ impl AgentSession {
             };
             self.check_compaction(&last, entry_id.as_deref(), false, &tool_results).await;
         }
+        check_cancelled(cancel)?;
         let servers_section = self.prepare_mcp_for_prompt().await;
+        check_cancelled(cancel)?;
         let mut prompt_options = self.effective_prompt_options();
         set_servers_section(&mut prompt_options, servers_section);
         // Before image normalization, so a model chosen by a handler sets the resize profile.
         let (prompt_options, extra) = self.run_before_agent_start(trigger, prompt_options).await;
+        // Admission begins here. A later stop preserves the accepted input and aborts its run.
+        check_cancelled(cancel)?;
         let mut messages = match trigger {
             RunTrigger::User { prompt, images, from_extension } => {
                 let (images, hints) = self.normalize_prompt_images(images);
@@ -252,7 +296,7 @@ impl AgentSession {
         if let Some(update) = update {
             messages.insert(0, Message::System(update));
         }
-        messages
+        Ok(messages)
     }
 
     /// `/skill:name args` and `/template args` expansion; on an error the text is sent as is.
@@ -330,7 +374,7 @@ impl AgentSession {
             self.ensure_not_extension_command(text)?;
         }
         let streaming = self.is_streaming().then_some(behavior);
-        let Some((text, images)) = self.run_input_handlers(text, images, source, streaming).await else {
+        let Some((text, images)) = self.run_input_handlers(text, images, source, streaming).await? else {
             return Ok(PromptDisposition::Handled);
         };
         let expanded = self.expand_input(&text);
@@ -402,7 +446,7 @@ impl AgentSession {
                 self.wait_while_compacting().await;
                 return Box::pin(self.send_custom_message(custom, true)).await;
             }
-            return self.start_run(RunTrigger::Custom(custom), || {}).await;
+            return self.start_run(RunTrigger::Custom(custom), None, || {}).await;
         }
         self.append_custom_message(message);
         Ok(())

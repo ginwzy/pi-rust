@@ -54,7 +54,7 @@ pub use self::file_checkpoints::{MAX_CHECKPOINT_FILE_BYTES, MAX_UNDO_PROMPTS, Un
 pub use self::llama_api::LlamaProgressFn;
 pub use self::model::ModelCycleResult;
 pub use self::model_runtime::{ModelRuntime, ModelRuntimeOptions};
-pub use self::prompt::{BranchPrompt, PromptDisposition, PromptOptions, StreamingBehavior};
+pub use self::prompt::{BranchPrompt, PromptCancelled, PromptDisposition, PromptOptions, StreamingBehavior};
 pub use self::run_limits::{RUN_LIMIT_EXIT_CODE, RunLimitKind, RunLimitStop, RunLimits};
 pub use self::runtime::{
     AgentSessionRuntime, AsyncSetupFn, ForkPosition, ForkResult, InvalidateFn, RuntimeFactory, RuntimeParts,

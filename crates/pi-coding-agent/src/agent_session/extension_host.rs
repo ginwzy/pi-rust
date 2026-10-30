@@ -226,7 +226,7 @@ impl AgentSession {
                     .boxed(),
                 ));
             }
-            return Ok(Some(async move { session.start_run(RunTrigger::Custom(custom), || {}).await }.boxed()));
+            return Ok(Some(async move { session.start_run(RunTrigger::Custom(custom), None, || {}).await }.boxed()));
         } else if self.is_streaming() {
             lock(&self.state).pending_custom.push(message);
         } else {
@@ -338,9 +338,9 @@ impl AgentSession {
         images: Vec<ContentBlock>,
         source: &str,
         behavior: Option<StreamingBehavior>,
-    ) -> Option<(String, Vec<ContentBlock>)> {
+    ) -> anyhow::Result<Option<(String, Vec<ContentBlock>)>> {
         let Some(runner) = self.extension_runner().filter(|runner| runner.has_handlers("input")) else {
-            return Some((text.to_string(), images));
+            return Ok(Some((text.to_string(), images)));
         };
         let behavior = behavior.map(|behavior| match behavior {
             StreamingBehavior::Steer => "steer",
@@ -348,8 +348,8 @@ impl AgentSession {
         });
         let images_json = if images.is_empty() { Value::Null } else { json!(images) };
         let args = vec![json!(text), images_json, json!(source), json!(behavior)];
-        let Ok(result) = runner.call_json("emitInput", args).await else { return Some((text.to_string(), images)) };
-        match result["action"].as_str() {
+        let result = runner.call_json("emitInput", args).await.context("Extension input handler call failed")?;
+        Ok(match result["action"].as_str() {
             Some("handled") => None,
             Some("transform") => {
                 let text = result["text"].as_str().unwrap_or(text).to_string();
@@ -357,7 +357,7 @@ impl AgentSession {
                 Some((text, images))
             }
             _ => Some((text.to_string(), images)),
-        }
+        })
     }
 
     /// `before_agent_start`: prompt options to run with and custom messages to send along.
