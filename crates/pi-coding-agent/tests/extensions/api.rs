@@ -1,11 +1,143 @@
 //! The `ExtensionAPI` (`pi.*`) methods, each checked through the session or the runner.
 
 use pi_ai::providers::faux::FauxResponse;
+use pi_coding_agent::agent_session::PromptDisposition;
+use pi_coding_agent::extensions::backend::ExtensionRuntime;
 use pi_coding_agent::markdown_transform::{MarkdownMessageType, MarkdownTransformContext};
 use pi_tui::Component;
 use serde_json::{Value, json};
 
 use crate::harness::{Setup, eventually, harness};
+
+const COMMANDS: &str = r#"export default function (pi) {
+    const waiting = [];
+    pi.registerCommand("ok", { handler: async () => {} });
+    pi.registerCommand("throws", { handler: async () => { throw new Error("handler failed"); } });
+    pi.registerCommand("collected", { handler: async () => {
+        pi.appendEntry("command-started", {});
+        await new Promise(() => {});
+    } });
+    pi.registerCommand("waiting", { handler: async () => {
+        pi.appendEntry("command-started", {});
+        await new Promise((resolve) => waiting.push(resolve));
+    } });
+}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn command_call_failures_do_not_become_prompts() {
+    for shutdown in [false, true] {
+        let h = harness(Setup {
+            files: vec![("commands.ts", COMMANDS.into())],
+            load: vec!["commands.ts"],
+            responses: vec![FauxResponse::text("must not be requested")],
+            runtime: Some(ExtensionRuntime::QuickJs),
+            ..Setup::default()
+        })
+        .await;
+        if shutdown {
+            h.runner.shutdown();
+        }
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(5), h.session.prompt("/collected", Vec::new()))
+                .await
+                .expect("command call must settle");
+        let error = result.expect_err("failed command must not become a prompt");
+        assert!(error.to_string().contains("/collected"), "{error:#}");
+        assert!(h.provider.requests().is_empty());
+        assert!(!h.entries().iter().any(|entry| entry["message"]["role"] == "user"));
+        if !shutdown {
+            assert_eq!(h.entries().iter().filter(|entry| entry["customType"] == "command-started").count(), 1);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn command_dispatch_preserves_handled_and_unregistered_inputs() {
+    let h = harness(Setup {
+        files: vec![("commands.ts", COMMANDS.into())],
+        load: vec!["commands.ts"],
+        responses: vec![FauxResponse::text("ordinary prompt")],
+        runtime: Some(ExtensionRuntime::QuickJs),
+        ..Setup::default()
+    })
+    .await;
+    for text in ["/ok", "/throws"] {
+        assert_eq!(h.session.prompt(text, Vec::new()).await.unwrap(), PromptDisposition::Handled);
+    }
+    assert_eq!(h.errors.lock().unwrap().len(), 1);
+    assert!(h.provider.requests().is_empty());
+    assert!(!h.entries().iter().any(|entry| entry["message"]["role"] == "user"));
+    assert_eq!(h.session.prompt("/unregistered", Vec::new()).await.unwrap(), PromptDisposition::Started);
+    assert_eq!(h.provider.requests().len(), 1);
+    assert_eq!(h.last_prompt(), "/unregistered");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutting_down_an_inflight_command_does_not_start_a_run() {
+    let h = harness(Setup {
+        files: vec![("commands.ts", COMMANDS.into())],
+        load: vec!["commands.ts"],
+        responses: vec![FauxResponse::text("must not be requested")],
+        runtime: Some(ExtensionRuntime::QuickJs),
+        ..Setup::default()
+    })
+    .await;
+    let session = h.session.clone();
+    let task = tokio::spawn(async move { session.prompt("/waiting", Vec::new()).await });
+    eventually(|| h.entries().iter().any(|entry| entry["customType"] == "command-started")).await;
+    h.runner.shutdown();
+    let error = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("shutdown must release the call")
+        .unwrap()
+        .unwrap_err();
+    assert!(error.to_string().contains("/waiting"), "{error:#}");
+    assert!(h.provider.requests().is_empty());
+    assert!(!h.entries().iter().any(|entry| entry["message"]["role"] == "user"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reload_releases_the_old_runtime_when_its_command_finishes_or_is_cancelled() {
+    let source = r#"import { writeFileSync, appendFileSync } from "node:fs";
+const waiting = [];
+export default function (pi) {
+    pi.registerCommand("ok", { handler: async () => {} });
+    pi.registerCommand("reload", { handler: async (args, ctx) => {
+        const { file, hang } = JSON.parse(args);
+        await ctx.reload();
+        writeFileSync(file, "returned");
+        setTimeout(() => appendFileSync(file, "late"), 500);
+        if (hang) await new Promise((resolve) => waiting.push(resolve));
+    } });
+}"#;
+    for hang in [false, true] {
+        let h = harness(Setup {
+            files: vec![("reload.ts", source.into())],
+            load: vec!["reload.ts"],
+            from_settings: true,
+            runtime: Some(ExtensionRuntime::QuickJs),
+            ..Setup::default()
+        })
+        .await;
+        let file = h.cwd.join("returned.txt");
+        let input = format!("/reload {}", json!({"file": file, "hang": hang}));
+        let session = h.session.clone();
+        let task = tokio::spawn(async move { session.prompt(&input, Vec::new()).await });
+        eventually(|| file.exists()).await;
+        if hang {
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+        } else {
+            assert_eq!(task.await.unwrap().unwrap(), PromptDisposition::Handled);
+        }
+        assert!(h.runner.is_stale());
+        assert_eq!(h.session.prompt("/ok", Vec::new()).await.unwrap(), PromptDisposition::Handled);
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "returned");
+        assert!(h.provider.requests().is_empty());
+        assert!(!h.entries().iter().any(|entry| entry["message"]["role"] == "user"));
+    }
+}
 
 fn probe_extension() -> String {
     let exe = std::env::current_exe().unwrap().display().to_string();

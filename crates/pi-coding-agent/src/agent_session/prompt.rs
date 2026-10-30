@@ -133,7 +133,7 @@ impl AgentSession {
             self.wait_extensions_bound().await;
         }
         // Extension commands run first, even while streaming; they send their own messages.
-        if options.expand_prompt_templates && text.starts_with('/') && self.try_extension_command(text).await {
+        if options.expand_prompt_templates && text.starts_with('/') && self.try_extension_command(text).await? {
             if let Some(callback) = &options.preflight_result {
                 callback(PromptDisposition::Handled);
             }

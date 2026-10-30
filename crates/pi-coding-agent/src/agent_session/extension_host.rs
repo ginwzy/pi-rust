@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, RwLock};
 
+use anyhow::Context;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use pi_ai::{ContentBlock, Message, UserContent};
@@ -300,15 +301,21 @@ impl AgentSession {
         prompt_options_to_json(&self.effective_prompt_options())
     }
 
-    /// Run `/name args` when an extension registered `name`; true when it did.
-    pub(crate) async fn try_extension_command(&self, text: &str) -> bool {
-        let Some(runner) = self.extension_runner() else { return false };
+    /// Run `/name args`; only an unregistered command may fall through to a prompt.
+    pub(crate) async fn try_extension_command(&self, text: &str) -> anyhow::Result<bool> {
+        let Some(runner) = self.extension_runner() else { return Ok(false) };
         let body = &text[1..];
         let (name, args) = body.split_once(' ').unwrap_or((body, ""));
         if runner.registry().command(name).is_none() {
-            return false;
+            return Ok(false);
         }
-        matches!(runner.call_json("runCommand", vec![json!(name), json!(args)]).await, Ok(Value::Bool(true)))
+        let result =
+            runner.run_command(name, args).await.with_context(|| format!("Extension command \"/{name}\" failed"))?;
+        anyhow::ensure!(
+            result == Value::Bool(true),
+            "Extension command \"/{name}\" returned an invalid dispatch result"
+        );
+        Ok(true)
     }
 
     /// Upstream `_throwIfExtensionCommand`: extension commands run, they are never queued.
@@ -484,9 +491,10 @@ impl AgentSession {
         };
         self.shutdown_extensions("reload", None).await;
         if let Some(old) = &old {
+            old.invalidate(None).await;
             old.unregister_models();
             old.remove_tools();
-            old.shutdown();
+            old.retire();
         }
         *self.extensions.runner.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         let package_error = self.reload_resources().await;

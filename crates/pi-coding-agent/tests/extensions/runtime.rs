@@ -8,7 +8,7 @@ use std::sync::Arc;
 use pi_ai::auth::InMemoryCredentialStore;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
-use pi_coding_agent::agent_session::{AgentSessionRuntime, ForkPosition};
+use pi_coding_agent::agent_session::{AgentSessionRuntime, ForkPosition, PromptDisposition};
 use pi_coding_agent::app::AppOptions;
 use pi_coding_agent::extension_ui::{ExtensionMode, ExtensionUi, NoOpExtensionUi};
 use pi_coding_agent::extensions::ExtensionBindings;
@@ -127,7 +127,15 @@ async fn reload_loads_changed_extensions_and_starts_them_again() {
     let r = runtime(LIFECYCLE, Vec::new(), ExtensionMode::Tui).await;
     let changed = LIFECYCLE.replace("start ${event.reason}", "restarted ${event.reason}");
     std::fs::write(&r.extension, changed).unwrap();
-    r.runtime.session().prompt("/again", Vec::new()).await.unwrap();
+    assert_eq!(r.runtime.session().prompt("/again", Vec::new()).await.unwrap(), PromptDisposition::Handled);
+    assert!(
+        !r.runtime
+            .session()
+            .session_manager()
+            .entries()
+            .iter()
+            .any(|entry| entry_json(entry)["message"]["role"] == "user")
+    );
     eventually(|| r.ui.calls().len() >= 3).await;
     assert_eq!(
         r.ui.calls(),

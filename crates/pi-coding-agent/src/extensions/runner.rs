@@ -75,10 +75,32 @@ pub(crate) type DataFn = Arc<dyn Fn(&str) + Send + Sync>;
 /// An API implementation a runner replaced, and the provider that owns the replacement.
 pub(crate) type ReplacedApi = (Option<Arc<dyn ApiProvider>>, Option<String>);
 
+#[derive(Default)]
+struct Commands {
+    active: usize,
+    retired: bool,
+}
+
+struct Command<'a>(&'a ExtensionRunner);
+
+impl Drop for Command<'_> {
+    fn drop(&mut self) {
+        let shutdown = {
+            let mut commands = lock(&self.0.commands);
+            commands.active -= 1;
+            commands.retired && commands.active == 0
+        };
+        if shutdown {
+            self.0.shutdown();
+        }
+    }
+}
+
 /// One loaded set of extensions. Always held in an `Arc`.
 pub struct ExtensionRunner {
     js: JsHandle,
     runtime: Mutex<Option<JsRuntime>>,
+    commands: Mutex<Commands>,
     host: OnceLock<JsRef>,
     backend: JsBackend,
     /// The `--extension-runtime` choice, passed on to the runner a reload starts.
@@ -184,6 +206,7 @@ impl ExtensionRunner {
             ExtensionRunner {
                 js: js.clone(),
                 runtime: Mutex::new(Some(runtime)),
+                commands: Mutex::default(),
                 host: OnceLock::new(),
                 backend,
                 requested_runtime: OnceLock::new(),
@@ -279,6 +302,30 @@ impl ExtensionRunner {
     pub(crate) async fn call_json(&self, method: &str, args: Vec<Value>) -> Result<Value, JsError> {
         let args = args.into_iter().map(HostValue::Json).collect();
         Ok(self.call(method, args).await?.into_json())
+    }
+
+    pub(crate) async fn run_command(&self, name: &str, args: &str) -> Result<Value, JsError> {
+        {
+            let mut commands = lock(&self.commands);
+            if commands.retired {
+                return Err(JsError::new("The extension runtime was replaced"));
+            }
+            commands.active += 1;
+        }
+        let _command = Command(self);
+        self.call_json("runCommand", vec![json!(name), json!(args)]).await
+    }
+
+    /// Let a command awaiting its own reload finish before releasing its old runtime.
+    pub(crate) fn retire(&self) {
+        let shutdown = {
+            let mut commands = lock(&self.commands);
+            commands.retired = true;
+            commands.active == 0
+        };
+        if shutdown {
+            self.shutdown();
+        }
     }
 
     /// Load extension files in order. Failures are kept as [`Self::load_errors`].
