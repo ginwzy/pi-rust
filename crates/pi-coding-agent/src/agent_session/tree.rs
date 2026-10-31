@@ -372,6 +372,29 @@ impl AgentSession {
         Ok(())
     }
 
+    /// Set a background result only if the last session-info entry is still `expected`.
+    /// An intervening clear or same-value rename also invalidates the result.
+    pub fn set_session_name_if_unchanged(&self, name: &str, expected: Option<&str>) -> anyhow::Result<bool> {
+        let name = {
+            let mut session = self.session_manager();
+            let current = session
+                .entries()
+                .iter()
+                .rev()
+                .find(|entry| entry.raw().get("type").and_then(serde_json::Value::as_str) == Some("session_info"));
+            if current.map(|entry| entry.id()) != expected {
+                return Ok(false);
+            }
+            session.append_session_info(name)?;
+            session.session_name()
+        };
+        if let Some(runner) = self.extension_runner() {
+            runner.emit_detached(serde_json::json!({"type": "session_info_changed", "name": name}));
+        }
+        self.emit(&super::AgentSessionEvent::SessionInfoChanged { name });
+        Ok(true)
+    }
+
     /// Name the session stored at `path`, as the resume picker does. This session goes through
     /// [`Self::set_session_name`], so its manager and extensions see the new name at once; any
     /// other session is renamed on disk only.

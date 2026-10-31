@@ -150,6 +150,12 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
+    /// Independent model requests with this session's auth and provider hooks.
+    /// Calling this does not append messages or start an agent run.
+    pub fn auxiliary_stream(&self) -> StreamFn {
+        self.stream_fn.clone()
+    }
+
     /// The low-level agent. Its transcript mirrors the session projection.
     pub fn agent(&self) -> &Agent {
         &self.agent

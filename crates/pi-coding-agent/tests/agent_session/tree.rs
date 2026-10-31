@@ -28,6 +28,23 @@ async fn two_turns(extra: Vec<FauxResponse>) -> Harness {
 }
 
 #[tokio::test]
+async fn conditional_name_write_rejects_intervening_rename_and_clear() {
+    let h = harness(Options::default()).await;
+    assert!(h.session.set_session_name_if_unchanged("generated", None).unwrap());
+    let prior = h.entries().last().unwrap()["id"].as_str().unwrap().to_owned();
+    h.session.set_session_name("extension").unwrap();
+    let count = h.entries().len();
+    assert!(!h.session.set_session_name_if_unchanged("late", Some(&prior)).unwrap());
+    assert_eq!(h.entries().len(), count);
+    assert_eq!(h.session.session_manager().session_name().as_deref(), Some("extension"));
+    h.session.set_session_name("").unwrap();
+    assert!(!h.session.set_session_name_if_unchanged("late", None).unwrap());
+    let current = h.entries().last().unwrap()["id"].as_str().unwrap().to_owned();
+    assert!(h.session.set_session_name_if_unchanged("new", Some(&current)).unwrap());
+    assert_eq!(h.session.session_manager().session_name().as_deref(), Some("new"));
+}
+
+#[tokio::test]
 async fn navigates_to_a_user_message_and_returns_its_text() {
     let h = two_turns(Vec::new()).await;
     let second = user_entry_ids(&h)[1].clone();
