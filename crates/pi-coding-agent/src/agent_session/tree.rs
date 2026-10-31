@@ -94,6 +94,30 @@ impl AgentSession {
         target_id: &str,
         options: NavigateTreeOptions,
     ) -> anyhow::Result<NavigateTreeResult> {
+        self.navigate(Some(target_id), options, false, CancellationToken::new()).await
+    }
+
+    /// Host navigation to an exact entry, or the root. Without a summary this skips
+    /// `session_before_tree`; successful moves still emit `session_tree`.
+    pub async fn navigate_to(
+        &self,
+        target_id: Option<&str>,
+        options: NavigateTreeOptions,
+        cancel: CancellationToken,
+    ) -> anyhow::Result<NavigateTreeResult> {
+        self.navigate(target_id, options, true, cancel).await
+    }
+
+    async fn navigate(
+        &self,
+        target_id: Option<&str>,
+        mut options: NavigateTreeOptions,
+        exact: bool,
+        cancel: CancellationToken,
+    ) -> anyhow::Result<NavigateTreeResult> {
+        if cancel.is_cancelled() {
+            return Ok(NavigateTreeResult { cancelled: true, aborted: true, ..Default::default() });
+        }
         if self.is_streaming() {
             anyhow::bail!("Wait for the current response to finish before navigating the session tree.");
         }
@@ -105,37 +129,55 @@ impl AgentSession {
         let (old_leaf, entries, common_ancestor) = {
             let session = self.session_manager();
             let old_leaf = session.leaf_id().map(String::from);
-            if old_leaf.as_deref() == Some(target_id) {
+            if old_leaf.as_deref() == target_id {
                 return Ok(NavigateTreeResult::default());
             }
-            if session.get_entry(target_id).is_none() {
-                anyhow::bail!("Entry {target_id} not found");
+            if let Some(target_id) = target_id {
+                if session.get_entry(target_id).is_none() {
+                    anyhow::bail!("Entry {target_id} not found");
+                }
+                let (entries, ancestor) = collect_entries_for_branch_summary(&session, old_leaf.as_deref(), target_id);
+                (old_leaf, entries.into_iter().cloned().collect::<Vec<Entry>>(), ancestor)
+            } else {
+                options.summarize = false;
+                (old_leaf, Vec::new(), None)
             }
-            let (entries, ancestor) = collect_entries_for_branch_summary(&session, old_leaf.as_deref(), target_id);
-            (old_leaf, entries.into_iter().cloned().collect::<Vec<Entry>>(), ancestor)
         };
         let model = self.model();
         if options.summarize && model.is_none() {
             anyhow::bail!("No model available for summarization");
         }
-        let cancel = CancellationToken::new();
         lock(&self.state).branch_summary = Some(cancel.clone());
         self.notify_idle();
-        let mut options = options;
-        let hooked = self
-            .before_tree(target_id, old_leaf.as_deref(), common_ancestor.as_deref(), &entries, &mut options, &cancel)
-            .await;
+        let hooked = if exact && (!options.summarize || target_id.is_none()) {
+            BeforeTree::Continue
+        } else {
+            self.before_tree(
+                target_id.expect("legacy navigation has a target"),
+                old_leaf.as_deref(),
+                common_ancestor.as_deref(),
+                &entries,
+                &mut options,
+                &cancel,
+            )
+            .await
+        };
         let from_extension = matches!(hooked, BeforeTree::Summary(_));
         let summary = match hooked {
             BeforeTree::Cancelled => Ok(Some(Err(NavigateTreeResult { cancelled: true, ..Default::default() }))),
             BeforeTree::Summary(summary) => Ok(Some(Ok(*summary))),
             BeforeTree::Continue => match (options.summarize && !entries.is_empty(), model) {
-                (true, Some(model)) => self.branch_summary(&entries, &model, &options, cancel).await,
+                (true, Some(model)) if !cancel.is_cancelled() => {
+                    self.branch_summary(&entries, &model, &options, cancel.clone()).await
+                }
                 _ => Ok(None),
             },
         };
         lock(&self.state).branch_summary = None;
         self.notify_idle();
+        if cancel.is_cancelled() {
+            return Ok(NavigateTreeResult { cancelled: true, aborted: true, ..Default::default() });
+        }
         let summary = match summary {
             Ok(Some(Ok(summary))) => Some(summary),
             Ok(Some(Err(aborted))) => return Ok(aborted),
@@ -143,7 +185,7 @@ impl AgentSession {
             Err(error) => return Err(error),
         };
         let summarized = summary.is_some();
-        let result = self.apply_navigation(target_id, summary, options.label.as_deref(), from_extension)?;
+        let result = self.apply_navigation(target_id, summary, options.label.as_deref(), from_extension, exact)?;
         self.refresh_context();
         self.restore_tools_from_transcript(&[]);
         if let Some(runner) = self.extension_runner() {
@@ -243,22 +285,29 @@ impl AgentSession {
 
     fn apply_navigation(
         &self,
-        target_id: &str,
+        target_id: Option<&str>,
         summary: Option<PendingSummary>,
         label: Option<&str>,
         from_extension: bool,
+        exact: bool,
     ) -> anyhow::Result<NavigateTreeResult> {
         let mut session = self.session_manager();
-        let target =
-            session.get_entry(target_id).cloned().ok_or_else(|| anyhow::anyhow!("Entry {target_id} not found"))?;
-        let (new_leaf, editor_text) = match target.data() {
-            EntryData::Message(Message::User(user)) => {
-                (target.parent_id().map(String::from), Some(user_content_text(&user.content, "")))
+        let target = target_id
+            .map(|id| session.get_entry(id).cloned().ok_or_else(|| anyhow::anyhow!("Entry {id} not found")))
+            .transpose()?;
+        let (new_leaf, editor_text) = if exact {
+            (target_id.map(String::from), None)
+        } else {
+            match target.as_ref().expect("legacy navigation has a target").data() {
+                EntryData::Message(Message::User(user)) => {
+                    (target.as_ref().unwrap().parent_id().map(String::from), Some(user_content_text(&user.content, "")))
+                }
+                EntryData::CustomMessage(custom) => (
+                    target.as_ref().unwrap().parent_id().map(String::from),
+                    Some(user_content_text(&custom.content, "")),
+                ),
+                _ => (target_id.map(String::from), None),
             }
-            EntryData::CustomMessage(custom) => {
-                (target.parent_id().map(String::from), Some(user_content_text(&custom.content, "")))
-            }
-            _ => (Some(target_id.to_string()), None),
         };
         let label = label.filter(|label| !label.is_empty());
         let mut summary_entry_id = None;
@@ -276,7 +325,9 @@ impl AgentSession {
                     Some(id) => session.branch(id)?,
                     None => session.reset_leaf(),
                 }
-                if let Some(label) = label {
+                if let Some(label) = label
+                    && let Some(target_id) = target_id
+                {
                     session.append_label_change(target_id, Some(label))?;
                 }
             }

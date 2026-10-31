@@ -86,6 +86,8 @@ pi-rust has all the features of the upstream `pi` CLI and its libraries. This se
 
 ### Runtime
 
+- Embedded hosts can use `AgentSession::navigate_to` for exact entry or root navigation with a cancellation token. It skips pre-navigation hooks without a summary. The existing `navigate_tree` editor semantics are unchanged.
+
 - Extensions run on an embedded QuickJS engine, so pi-rust does not need Node.js. All Node built-in modules load. These include:
   - `zlib` with gzip, brotli, and zstd.
   - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.

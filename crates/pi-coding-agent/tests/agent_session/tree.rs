@@ -5,6 +5,7 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_ai::{Message, ThinkingLevel};
 use pi_coding_agent::agent_session::NavigateTreeOptions;
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::harness::{Harness, Options, harness, roles};
 
@@ -41,6 +42,48 @@ async fn navigates_to_a_user_message_and_returns_its_text() {
     assert_eq!(noop.editor_text, None);
     let missing = h.session.navigate_tree("nope", NavigateTreeOptions::default()).await.unwrap_err();
     assert_eq!(missing.to_string(), "Entry nope not found");
+}
+
+#[tokio::test]
+async fn host_navigation_keeps_exact_user_targets_and_can_clear_to_root() {
+    let h = two_turns(Vec::new()).await;
+    let target = user_entry_ids(&h)[1].clone();
+    let result =
+        h.session.navigate_to(Some(&target), NavigateTreeOptions::default(), CancellationToken::new()).await.unwrap();
+    assert!(result.editor_text.is_none());
+    assert_eq!(h.session.session_manager().leaf_id(), Some(target.as_str()));
+    assert_eq!(roles(&h.session.messages()), ["system", "user", "assistant", "user"]);
+    h.session
+        .navigate_to(None, NavigateTreeOptions { summarize: true, ..Default::default() }, CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(h.session.session_manager().leaf_id().is_none());
+    assert!(h.session.messages().is_empty());
+    assert_eq!(h.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn host_summary_attaches_to_the_exact_target_and_honors_pre_cancel() {
+    let h = two_turns(vec![FauxResponse::text("branch summary")]).await;
+    let target = user_entry_ids(&h)[0].clone();
+    let old = h.session.session_manager().leaf_id().map(String::from);
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let result = h.session.navigate_to(Some(&target), NavigateTreeOptions::default(), cancel).await.unwrap();
+    assert!(result.aborted && result.cancelled);
+    assert_eq!(h.session.session_manager().leaf_id(), old.as_deref());
+    let result = h
+        .session
+        .navigate_to(
+            Some(&target),
+            NavigateTreeOptions { summarize: true, ..Default::default() },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let summary = result.summary_entry_id.unwrap();
+    assert_eq!(h.session.session_manager().get_entry(&summary).unwrap().parent_id(), Some(target.as_str()));
+    assert_eq!(h.requests().len(), 3);
 }
 
 #[tokio::test]
