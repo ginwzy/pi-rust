@@ -1,13 +1,14 @@
 //! Assistant event protocol and the builder that providers use to emit it.
 
+use std::collections::VecDeque;
 use std::pin::Pin;
-use std::task::{Context as TaskContext, Poll};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Instant;
 
 use futures::Stream;
 use serde::Serialize;
 use serde_json::Value;
-use tokio::sync::mpsc;
 
 use crate::streaming_json::ToolCallArgumentsStream;
 use crate::types::{AssistantMessage, ContentBlock, DeferredHandle, JsonObject, Model, StopReason, ToolCall};
@@ -40,12 +41,60 @@ impl AssistantMessageEvent {
             _ => None,
         }
     }
+
+    /// Folds `next` into this unread delta when both extend the same block, which equals
+    /// reading them in turn. Otherwise returns `next`.
+    fn absorb(&mut self, next: Self) -> Option<Self> {
+        match (self, next) {
+            (
+                Self::TextDelta { content_index, delta, partial },
+                Self::TextDelta { content_index: index, delta: more, partial: latest },
+            )
+            | (
+                Self::ThinkingDelta { content_index, delta, partial },
+                Self::ThinkingDelta { content_index: index, delta: more, partial: latest },
+            )
+            | (
+                Self::ToolcallDelta { content_index, delta, partial },
+                Self::ToolcallDelta { content_index: index, delta: more, partial: latest },
+            ) if *content_index == index => {
+                delta.push_str(&more);
+                *partial = latest;
+                None
+            }
+            (_, next) => Some(next),
+        }
+    }
+}
+
+/// Events not yet read. Every delta carries the whole partial message, so a reader that
+/// falls behind would otherwise hold one copy of the response per chunk. Past
+/// `UNREAD_LIMIT` events, a delta is absorbed into the unread one before it.
+struct Queue {
+    events: VecDeque<AssistantMessageEvent>,
+    senders: usize,
+    reading: bool,
+    waker: Option<Waker>,
+}
+
+pub(crate) const UNREAD_LIMIT: usize = 32;
+
+fn lock(queue: &Mutex<Queue>) -> MutexGuard<'_, Queue> {
+    queue.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Receiving half of a provider response.
 pub struct AssistantMessageEventStream {
-    receiver: mpsc::UnboundedReceiver<AssistantMessageEvent>,
+    queue: Arc<Mutex<Queue>>,
     finished: bool,
+}
+
+impl Drop for AssistantMessageEventStream {
+    fn drop(&mut self) {
+        let mut queue = lock(&self.queue);
+        queue.reading = false;
+        queue.events.clear();
+    }
 }
 
 impl AssistantMessageEventStream {
@@ -77,31 +126,69 @@ impl Stream for AssistantMessageEventStream {
         if self.finished {
             return Poll::Ready(None);
         }
-        let polled = self.receiver.poll_recv(context);
-        if let Poll::Ready(Some(event)) = &polled
-            && event.final_message().is_some()
-        {
-            self.finished = true;
-        }
-        polled
+        let mut queue = lock(&self.queue);
+        let Some(event) = queue.events.pop_front() else {
+            if queue.senders == 0 {
+                return Poll::Ready(None);
+            }
+            queue.waker = Some(context.waker().clone());
+            return Poll::Pending;
+        };
+        drop(queue);
+        self.finished = event.final_message().is_some();
+        Poll::Ready(Some(event))
     }
 }
 
 /// Sending half of a provider response.
-#[derive(Clone)]
 pub struct EventSender {
-    sender: mpsc::UnboundedSender<AssistantMessageEvent>,
+    queue: Arc<Mutex<Queue>>,
 }
 
 impl EventSender {
+    /// Queues `event`; past `UNREAD_LIMIT` unread events, a delta joins the unread delta of
+    /// the same block before it.
     pub fn push(&self, event: AssistantMessageEvent) {
-        let _ = self.sender.send(event);
+        let mut queue = lock(&self.queue);
+        if !queue.reading {
+            return;
+        }
+        let full = queue.events.len() >= UNREAD_LIMIT;
+        let event = match queue.events.back_mut() {
+            Some(last) if full => last.absorb(event),
+            _ => Some(event),
+        };
+        queue.events.extend(event);
+        let waker = queue.waker.take();
+        drop(queue);
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+    }
+}
+
+impl Clone for EventSender {
+    fn clone(&self) -> Self {
+        lock(&self.queue).senders += 1;
+        Self { queue: self.queue.clone() }
+    }
+}
+
+impl Drop for EventSender {
+    fn drop(&mut self) {
+        let mut queue = lock(&self.queue);
+        queue.senders -= 1;
+        let waker = (queue.senders == 0).then(|| queue.waker.take()).flatten();
+        drop(queue);
+        if let Some(waker) = waker {
+            waker.wake();
+        }
     }
 }
 
 pub fn event_channel() -> (EventSender, AssistantMessageEventStream) {
-    let (sender, receiver) = mpsc::unbounded_channel();
-    (EventSender { sender }, AssistantMessageEventStream { receiver, finished: false })
+    let queue = Arc::new(Mutex::new(Queue { events: VecDeque::new(), senders: 1, reading: true, waker: None }));
+    (EventSender { queue: queue.clone() }, AssistantMessageEventStream { queue, finished: false })
 }
 
 /// A stream that fails immediately, for request setup errors.
@@ -496,6 +583,63 @@ mod tests {
         assert_eq!(*reason, StopReason::ToolUse);
         assert_eq!(message.text(), "Hello world");
         assert_eq!(message.tool_calls().next().unwrap().arguments["path"], "a.txt");
+    }
+
+    #[tokio::test]
+    async fn a_reader_past_the_unread_limit_holds_one_partial_per_block() {
+        let (sender, stream) = event_channel();
+        let mut builder = MessageBuilder::new(&model(), sender);
+        builder.start();
+        builder.thinking_delta("plan");
+        let chunks: Vec<_> = (0..UNREAD_LIMIT * 3).map(|ix| format!("{ix} ")).collect();
+        for chunk in &chunks {
+            builder.text_delta(chunk);
+        }
+        builder.finish(StopReason::Stop);
+        let events: Vec<_> = stream.collect().await;
+        assert!(events.len() <= UNREAD_LIMIT + 3, "{} events", events.len());
+        let text = chunks.concat();
+        let mut deltas = String::new();
+        let mut last = None;
+        for event in &events {
+            match event {
+                AssistantMessageEvent::TextDelta { content_index, delta, partial } => {
+                    assert_eq!(*content_index, 1);
+                    deltas.push_str(delta);
+                    assert_eq!(partial.text(), deltas, "each partial includes every delta read");
+                    last = Some(partial.text());
+                }
+                AssistantMessageEvent::ThinkingDelta { delta, .. } => assert_eq!(delta, "plan"),
+                _ => {}
+            }
+        }
+        assert_eq!((deltas, last), (text.clone(), Some(text)));
+        let AssistantMessageEvent::TextEnd { .. } = &events[events.len() - 2] else { panic!() };
+    }
+
+    #[tokio::test]
+    async fn a_reader_that_keeps_up_receives_every_delta() {
+        let (sender, mut stream) = event_channel();
+        let mut builder = MessageBuilder::new(&model(), sender);
+        builder.text_delta("Hello");
+        assert!(matches!(stream.next().await, Some(AssistantMessageEvent::TextStart { .. })));
+        assert!(matches!(stream.next().await, Some(AssistantMessageEvent::TextDelta { .. })));
+        builder.text_delta(" world");
+        let Some(AssistantMessageEvent::TextDelta { delta, partial, .. }) = stream.next().await else { panic!() };
+        assert_eq!((delta.as_str(), partial.text()), (" world", "Hello world".into()));
+    }
+
+    #[tokio::test]
+    async fn the_stream_ends_when_every_sender_is_gone() {
+        let (sender, mut stream) = event_channel();
+        let clone = sender.clone();
+        drop(sender);
+        clone.push(AssistantMessageEvent::Start { partial: AssistantMessage::empty(&model()) });
+        assert!(matches!(stream.next().await, Some(AssistantMessageEvent::Start { .. })));
+        let pending = tokio::time::timeout(std::time::Duration::from_millis(20), stream.next()).await;
+        assert!(pending.is_err(), "a live sender keeps the stream open");
+        drop(clone);
+        assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]

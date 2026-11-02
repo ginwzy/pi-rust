@@ -261,7 +261,8 @@ async fn every_path_shows_growing_partial_arguments_and_finishes_with_the_exact_
         }
         let message = message.unwrap();
         assert_eq!(message.stop_reason, StopReason::ToolUse, "{path}: {:?}", message.error_message);
-        assert!(partials > 100, "{path}: {partials} partials");
+        // A reader that falls behind sees later deltas absorbed, but never before the unread limit.
+        assert!(partials > crate::stream::UNREAD_LIMIT / 2, "{path}: {partials} partials");
         let calls: Vec<_> = message.tool_calls().collect();
         assert_eq!(calls.len(), 1, "{path}");
         assert_eq!((calls[0].name.as_str(), calls[0].arguments_error.as_deref()), ("write", None), "{path}");
