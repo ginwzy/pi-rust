@@ -99,6 +99,8 @@ pub(crate) struct RunState {
     pub overflow_recovery_attempted: bool,
     /// The latest assistant message of the run and its session entry.
     pub last_assistant: Option<(AssistantMessage, Option<String>)>,
+    /// The entry id reserved for the assistant message being streamed.
+    pub streaming_entry: Option<String>,
     pub turn_tool_results: Vec<String>,
     pub last_tool_results: Vec<String>,
     pub manual_compaction: Option<CancellationToken>,
@@ -188,6 +190,13 @@ impl AgentSession {
     /// The session tree, locked. Do not hold the guard across session calls.
     pub fn session_manager(&self) -> MutexGuard<'_, SessionManager> {
         lock(&self.session)
+    }
+
+    /// The entry id the assistant message now streaming is saved under, known from its
+    /// `message_start`; `None` between assistant messages. Agent listeners subscribed
+    /// after this session see it for the event they handle.
+    pub fn streaming_entry_id(&self) -> Option<String> {
+        lock(&self.state).streaming_entry.clone()
     }
 
     /// A copy of the agent state (messages, model, tools, streaming flags).

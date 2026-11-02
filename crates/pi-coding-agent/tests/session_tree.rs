@@ -33,6 +33,27 @@ fn appends_chain_parent_ids_and_advance_the_leaf() {
 }
 
 #[test]
+fn a_reserved_id_is_kept_for_the_message_appended_under_it() {
+    let mut session = memory();
+    let first = session.append_message(&user("first")).unwrap();
+    let reserved = session.reserve_entry_id();
+    // Entries appended meanwhile, as Jian's records are, take other ids.
+    let model = session.append_model_change("openai", "gpt-4").unwrap();
+    assert_ne!(model, reserved);
+    assert_eq!(session.append_message_as(&reserved, &assistant("reply")).unwrap(), reserved);
+    let entries = session.entries();
+    assert_eq!((entries[2].id(), entries[2].parent_id()), (reserved.as_str(), Some(model.as_str())));
+    assert_eq!(entries[0].id(), first);
+    // An id is used once, and only after it was reserved.
+    assert!(session.append_message_as(&reserved, &assistant("again")).is_err());
+    assert!(session.append_message_as("unreserved", &assistant("again")).is_err());
+    let released = session.reserve_entry_id();
+    session.release_entry_id(&released);
+    assert!(session.append_message_as(&released, &assistant("late")).is_err());
+    assert_eq!(session.entries().len(), 3);
+}
+
+#[test]
 fn compaction_and_custom_entries_join_the_tree() {
     let mut session = memory();
     let id1 = session.append_message(&user("1")).unwrap();

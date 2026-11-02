@@ -30,6 +30,15 @@ impl SessionManager {
 
     fn append_typed(&mut self, kind: &str, fields: Vec<(&str, Option<Value>)>) -> anyhow::Result<String> {
         let id = self.new_entry_id();
+        self.append_typed_as(id, kind, fields)
+    }
+
+    fn append_typed_as(
+        &mut self,
+        id: String,
+        kind: &str,
+        fields: Vec<(&str, Option<Value>)>,
+    ) -> anyhow::Result<String> {
         let mut all = vec![
             ("type", Some(Value::String(kind.into()))),
             ("id", Some(Value::String(id))),
@@ -43,6 +52,12 @@ impl SessionManager {
     /// Append a message. Summary roles belong in compaction and branch summary entries instead.
     pub fn append_message(&mut self, message: &Message) -> anyhow::Result<String> {
         self.append_typed("message", vec![("message", to_json(message))])
+    }
+
+    /// Append a message under an id from [`reserve_entry_id`](Self::reserve_entry_id).
+    pub fn append_message_as(&mut self, id: &str, message: &Message) -> anyhow::Result<String> {
+        anyhow::ensure!(self.reserved.remove(id), "entry id {id} is not reserved");
+        self.append_typed_as(id.to_string(), "message", vec![("message", to_json(message))])
     }
 
     pub fn append_thinking_level_change(&mut self, level: ThinkingLevel) -> anyhow::Result<String> {

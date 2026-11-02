@@ -13,7 +13,7 @@ pub mod storage;
 pub mod tree;
 pub mod usage;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -63,6 +63,8 @@ pub struct SessionManager {
     /// Target id to `(label, timestamp of the label change)`.
     labels: HashMap<String, (String, String)>,
     leaf: Option<String>,
+    /// Ids handed out for messages not appended yet; new ids avoid them.
+    reserved: HashSet<String>,
 }
 
 /// `<agent>/sessions/--<cwd with separators replaced>--`, as in the TypeScript pi.
@@ -93,6 +95,7 @@ impl SessionManager {
             by_id: HashMap::new(),
             labels: HashMap::new(),
             leaf: None,
+            reserved: HashSet::new(),
         };
         if persist && !manager.session_dir.as_os_str().is_empty() {
             // Best effort: writes create missing directories again.
@@ -332,7 +335,20 @@ impl SessionManager {
     }
 
     pub(crate) fn new_entry_id(&self) -> String {
-        ids::generate_entry_id(|id| self.by_id.contains_key(id))
+        ids::generate_entry_id(|id| self.by_id.contains_key(id) || self.reserved.contains(id))
+    }
+
+    /// Reserve the id of a message still being produced, which
+    /// [`append_message_as`](Self::append_message_as) later saves under it.
+    pub fn reserve_entry_id(&mut self) -> String {
+        let id = self.new_entry_id();
+        self.reserved.insert(id.clone());
+        id
+    }
+
+    /// Give back a reserved id that no entry will take.
+    pub fn release_entry_id(&mut self, id: &str) {
+        self.reserved.remove(id);
     }
 
     pub fn is_persisted(&self) -> bool {

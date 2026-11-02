@@ -254,3 +254,76 @@ async fn blocks_images_when_configured() {
     assert!(h.session.messages().iter().any(|message| matches!(message, Message::User(user)
         if matches!(&user.content, pi_ai::UserContent::Blocks(blocks) if blocks.len() > 1))));
 }
+
+/// Whether each recorded event started an assistant message, and the entry id it saw.
+type StreamingEntries = Arc<std::sync::Mutex<Vec<(bool, Option<String>)>>>;
+
+/// Records, for each assistant `message_start` and `message_update`, the entry id the session
+/// reports to a listener subscribed after it, as an embedding host is.
+fn record_streaming_entries(h: &crate::harness::Harness) -> StreamingEntries {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (session, record) = (Arc::downgrade(&h.session), seen.clone());
+    h.session.agent().subscribe(move |event| {
+        let start = match event {
+            pi_agent::AgentEvent::MessageStart { message: Message::Assistant(_) } => true,
+            pi_agent::AgentEvent::MessageUpdate { .. } => false,
+            _ => return,
+        };
+        let id = session.upgrade().and_then(|session| session.streaming_entry_id());
+        record.lock().unwrap().push((start, id));
+    });
+    seen
+}
+
+fn assistant_entry_ids(h: &crate::harness::Harness) -> Vec<String> {
+    h.entries()
+        .iter()
+        .filter(|entry| entry["message"]["role"] == "assistant")
+        .map(|entry| entry["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn assistant_messages_are_saved_under_the_entry_id_known_when_they_start() {
+    let h = harness(Options {
+        responses: vec![FauxResponse::tool_call("c1", "ls", json!({})), FauxResponse::text("done")],
+        ..Options::default()
+    })
+    .await;
+    let seen = record_streaming_entries(&h);
+    h.session.prompt("list", Vec::new()).await.unwrap();
+    let seen = seen.lock().unwrap().clone();
+    let started: Vec<_> = seen.iter().filter(|(start, _)| *start).map(|(_, id)| id.clone().unwrap()).collect();
+    assert_eq!(started, assistant_entry_ids(&h));
+    assert_ne!(started[0], started[1]);
+    // Updates see the id of the message they belong to.
+    let mut current = None;
+    for (start, id) in &seen {
+        if *start {
+            current = id.clone();
+        }
+        assert_eq!(id, &current);
+    }
+    assert_eq!(h.session.streaming_entry_id(), None);
+}
+
+#[tokio::test]
+async fn an_aborted_reply_is_saved_under_the_entry_id_it_streamed_with() {
+    let h = harness(Options {
+        responses: vec![FauxResponse::text("x".repeat(4_000))],
+        delay: Some(Duration::from_millis(2)),
+        ..Options::default()
+    })
+    .await;
+    let seen = record_streaming_entries(&h);
+    let session = h.session.clone();
+    let running = tokio::spawn(async move { session.prompt("long", Vec::new()).await });
+    wait_until(|| !h.events_of("message_update").is_empty()).await;
+    h.session.abort().await;
+    running.await.unwrap().unwrap();
+    let streamed = seen.lock().unwrap()[0].1.clone().unwrap();
+    let entries = h.entries();
+    let saved = entries.iter().find(|entry| entry["message"]["role"] == "assistant").unwrap();
+    assert_eq!((saved["id"].as_str(), &saved["message"]["stopReason"]), (Some(streamed.as_str()), &json!("aborted")));
+    assert_eq!(h.session.streaming_entry_id(), None);
+}

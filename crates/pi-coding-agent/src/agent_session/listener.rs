@@ -25,6 +25,10 @@ impl AgentSession {
         if let AgentEvent::MessageStart { message: Message::User(user) } = event {
             self.dequeue_user_text(&user.content);
         }
+        if let AgentEvent::MessageStart { message: Message::Assistant(_) } = event {
+            let id = self.session_manager().reserve_entry_id();
+            self.release_streaming_entry(lock(&self.state).streaming_entry.replace(id));
+        }
         // Detected before the message is persisted, as the scan must not contain it yet.
         let cache_miss = match event {
             AgentEvent::MessageEnd { message: Message::Assistant(assistant) } => self.cache_miss_notice(assistant),
@@ -42,6 +46,7 @@ impl AgentSession {
         }
         match event {
             AgentEvent::MessageEnd { message } => self.persist_message_end(message),
+            AgentEvent::AgentEnd { .. } => self.release_streaming_entry(lock(&self.state).streaming_entry.take()),
             AgentEvent::TurnEnd { message, .. } => {
                 {
                     let mut state = lock(&self.state);
@@ -51,6 +56,13 @@ impl AgentSession {
                 self.check_run_limits(message);
             }
             _ => {}
+        }
+    }
+
+    /// Give back an entry id reserved for an assistant message that ended unsaved.
+    fn release_streaming_entry(&self, id: Option<String>) {
+        if let Some(id) = id {
+            self.session_manager().release_entry_id(&id);
         }
     }
 
@@ -101,6 +113,14 @@ impl AgentSession {
                 })
             }
             Message::Custom(_) => None,
+            Message::Assistant(_) => {
+                let reserved = lock(&self.state).streaming_entry.take();
+                let mut session = self.session_manager();
+                report_save_error(match reserved {
+                    Some(id) => session.append_message_as(&id, message),
+                    None => session.append_message(message),
+                })
+            }
             _ => report_save_error(self.session_manager().append_message(message)),
         };
         match message {
