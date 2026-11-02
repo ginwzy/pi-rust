@@ -167,7 +167,10 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
                     if !session.model_runtime().has_configured_auth(&model.provider) {
                         json!(false)
                     } else {
-                        session.set_model(model, true).await.map_err(|failure| error(format!("{failure:#}")))?;
+                        session
+                            .set_model(model, session.extensions_save_defaults)
+                            .await
+                            .map_err(|failure| error(format!("{failure:#}")))?;
                         json!(true)
                     }
                 }

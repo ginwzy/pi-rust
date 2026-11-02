@@ -45,6 +45,7 @@ impl AgentSession {
     }
 
     fn apply_model(&self, model: Model, level: ThinkingLevel, persist: bool) {
+        let previous = self.model();
         if let Err(error) = self.session_manager().append_model_change(&model.provider, &model.id) {
             eprintln!("Warning: could not save session: {error:#}");
         }
@@ -55,6 +56,9 @@ impl AgentSession {
         self.agent.update_state(|state| state.model = model.clone());
         self.model_selected.store(true, std::sync::atomic::Ordering::Relaxed);
         self.set_thinking_level(level, false);
+        if !previous.is_some_and(|previous| models_are_equal(&previous, &model)) {
+            self.emit(&AgentSessionEvent::ModelChanged { model: &model });
+        }
     }
 
     fn add_persisted_default_to_scope(&self, model: &Model) {

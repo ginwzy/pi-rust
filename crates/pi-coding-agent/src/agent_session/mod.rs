@@ -144,6 +144,7 @@ pub struct AgentSession {
     warmer_host: Arc<cache::SessionWarmerHost>,
     pub(crate) extensions: extension_host::ExtensionState,
     run_limits: run_limits::RunLimitState,
+    pub(crate) extensions_save_defaults: bool,
     /// The extensions provider request hooks reach; shared with `stream_fn`.
     request_hooks: RequestHooksSlot,
     /// Files the edit and write tools changed, per prompt, for `/undo`.

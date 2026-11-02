@@ -127,6 +127,8 @@ pub struct Setup {
     pub mcp: Option<McpSessionOptions>,
     /// `--extension-runtime`; `None` runs on the backend `PI_EXTENSION_RUNTIME` names.
     pub runtime: Option<ExtensionRuntime>,
+    /// `CreateAgentSessionOptions::extensions_save_defaults`.
+    pub save_defaults: bool,
 }
 
 impl Default for Setup {
@@ -145,6 +147,7 @@ impl Default for Setup {
             start_event: None,
             mcp: None,
             runtime: None,
+            save_defaults: true,
         }
     }
 }
@@ -276,6 +279,7 @@ pub async fn harness(setup: Setup) -> Harness {
     let mut create = CreateAgentSessionOptions::new(services.clone(), manager);
     create.extensions = Some(runner.clone());
     create.session_start_event = setup.start_event.clone();
+    create.extensions_save_defaults = setup.save_defaults;
     if let Some(mcp) = &setup.mcp {
         create.mcp = mcp.clone();
     }

@@ -225,6 +225,58 @@ async fn api_methods_reach_the_session() {
     assert_eq!(h.session.model().map(|model| model.id), Some("other".to_string()));
 }
 
+const SWITCH: &str = r#"export default function (pi) {
+	pi.registerCommand("switch", { handler: async (_args, ctx) => {
+		pi.setThinkingLevel("high");
+		const other = ctx.modelRegistry.find("local", "other");
+		ctx.ui.notify(`model ${await pi.setModel(other)} ${await pi.setModel(other)}`);
+	} });
+}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn model_changes_are_reported_and_extension_defaults_can_stay_unsaved() {
+    for save in [true, false] {
+        let h = harness(Setup {
+            files: vec![("switch.ts", SWITCH.into())],
+            load: vec!["switch.ts"],
+            save_defaults: save,
+            ..Setup::default()
+        })
+        .await;
+        h.session.prompt("/switch", Vec::new()).await.unwrap();
+        assert_eq!(h.errors(), Vec::<String>::new());
+        assert_eq!(h.ui.calls(), ["notify(info): model true true"]);
+        // The level follows the model before its event; switching to the same model sends none.
+        let changes: Vec<Value> = h
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event["type"].as_str() {
+                Some("thinking_level_changed") => Some(event["level"].clone()),
+                Some("model_changed") => Some(event["model"]["id"].clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(changes, [json!("high"), json!("off"), json!("other")]);
+        // The session records the start model and every switch either way.
+        let recorded: Vec<Value> = h
+            .entries()
+            .iter()
+            .filter(|entry| entry["type"] == "model_change")
+            .map(|entry| entry["modelId"].clone())
+            .collect();
+        assert_eq!(recorded, [json!("tiny"), json!("other"), json!("other")]);
+        let settings = &h.services.settings;
+        let defaults = (settings.default_model(), settings.default_thinking_level().map(|level| level.as_str()));
+        if save {
+            assert_eq!(defaults, (Some("other".into()), Some("high")));
+        } else {
+            assert_eq!(defaults, (Some("tiny".into()), None));
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn exec_reports_why_a_command_could_not_start() {
     let source = r#"export default function (pi) {

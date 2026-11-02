@@ -59,6 +59,9 @@ pub struct CreateAgentSessionOptions {
     pub tool_options: Option<ToolsOptions>,
     /// `--max-turns` and `--max-cost` (pi-rust).
     pub run_limits: super::RunLimits,
+    /// Whether an extension's `setModel` and `setThinkingLevel` also save the defaults, as
+    /// upstream does. Hosts that own their defaults turn it off; the session still records them.
+    pub extensions_save_defaults: bool,
 }
 
 impl CreateAgentSessionOptions {
@@ -79,6 +82,7 @@ impl CreateAgentSessionOptions {
             session_start_event: None,
             tool_options: None,
             run_limits: super::RunLimits::default(),
+            extensions_save_defaults: true,
         }
     }
 }
@@ -252,6 +256,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             warmer_host,
             extensions: Default::default(),
             run_limits: super::run_limits::RunLimitState::new(options.run_limits),
+            extensions_save_defaults: options.extensions_save_defaults,
             request_hooks,
             file_checkpoints: Default::default(),
             weak: weak.clone(),

@@ -244,7 +244,7 @@ fn action(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, arg
         "setThinkingLevel" => {
             let level = crate::model_resolver::parse_thinking_level(&args.str(1)?)
                 .ok_or_else(|| error("Invalid thinking level"))?;
-            session.set_thinking_level(level, true);
+            session.set_thinking_level(level, session.extensions_save_defaults);
             Ok(done)
         }
         other => Err(error(format!("Unknown action: {other}"))),
