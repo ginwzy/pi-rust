@@ -55,6 +55,8 @@ pub struct ExtensionBindings {
     /// `ctx.abort()`; the session's abort when unset.
     pub abort: Option<ShutdownFn>,
     pub on_error: Option<ExtensionErrorFn>,
+    /// Capabilities this host refuses: their calls throw instead of returning a default.
+    pub unsupported: Option<super::capability::Unsupported>,
 }
 
 impl Default for ExtensionBindings {
@@ -66,6 +68,7 @@ impl Default for ExtensionBindings {
             shutdown: None,
             abort: None,
             on_error: None,
+            unsupported: None,
         }
     }
 }

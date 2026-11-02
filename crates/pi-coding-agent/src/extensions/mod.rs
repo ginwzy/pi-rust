@@ -4,6 +4,7 @@
 
 pub mod autocomplete;
 pub mod backend;
+pub mod capability;
 pub mod component;
 pub(crate) mod convert;
 pub mod inline;
@@ -30,6 +31,7 @@ pub mod tool;
 mod tui_hooks;
 pub mod vendor;
 
+pub use capability::{Capability, Unsupported};
 pub use component::{ComponentFactory, ComponentKind, CustomRequest, JsComponent};
 pub use inline::{InlineExtension, inline_path};
 pub use loader::{LoadEntry, discover_extensions_in_dir, load_entries, resolve_extension_entries};

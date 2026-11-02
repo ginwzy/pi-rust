@@ -85,6 +85,7 @@ impl ExtensionRunner {
 
 pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> Result<HostValue, JsError> {
     let (op, args) = split(args)?;
+    super::capability::check(runner, &op, &args)?;
     let (group, name) = op.split_once('.').unwrap_or((op.as_str(), ""));
     match group {
         "sdk" => super::ops_sdk::sync(runner, name, &args),
@@ -99,6 +100,7 @@ pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> R
 
 pub(crate) async fn dispatch_async(runner: Arc<ExtensionRunner>, args: Vec<HostValue>) -> Result<HostValue, JsError> {
     let (op, args) = split(args)?;
+    super::capability::check(&runner, &op, &args)?;
     if let Some(name) = op.strip_prefix("sdk.") {
         return super::ops_sdk::run(runner, name, args).await;
     }

@@ -44,6 +44,7 @@ impl RpcExtensionHost for ExtensionRpcHost {
                     error: error.error.clone(),
                 });
             })),
+            unsupported: None,
         };
         tokio::spawn(async move { session.bind_extensions(bindings).await });
     }

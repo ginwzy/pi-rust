@@ -444,3 +444,69 @@ async fn messages_from_extensions_trigger_turns_or_wait_for_the_next_one() {
     let seen = h.entries().into_iter().find(|entry| entry["customType"] == "seen").expect("input event");
     assert_eq!(seen["data"]["text"], "question from extension");
 }
+
+/// A host that refuses a capability makes its calls throw instead of returning the defaults of an
+/// absent UI or runtime; capabilities it does not list keep their behavior.
+#[tokio::test(flavor = "multi_thread")]
+async fn capabilities_a_host_refuses_throw_its_message() {
+    use pi_coding_agent::extensions::{Capability, ExtensionBindings, Unsupported};
+    let source = r#"import { writeFileSync } from "node:fs";
+export default function (pi) {
+    pi.registerCommand("probe", { handler: async (file, ctx) => {
+        const results = {};
+        const attempt = async (name, call) => {
+            try { results[name] = { value: (await call()) ?? null }; }
+            catch (error) { results[name] = { error: error.message, code: error.code ?? null }; }
+        };
+        const target = ctx.sessionManager.getEntries()[0]?.id ?? "missing";
+        const component = () => ({ render: () => [], invalidate() {} });
+        await attempt("navigateTree", () => ctx.navigateTree(target));
+        await attempt("reload", () => ctx.reload());
+        await attempt("custom", () => ctx.ui.custom(component));
+        await attempt("footer", () => ctx.ui.setFooter(component));
+        await attempt("widgetComponent", () => ctx.ui.setWidget("component", component));
+        await attempt("editorText", () => ctx.ui.getEditorText());
+        await attempt("widgetLines", () => ctx.ui.setWidget("lines", ["plain"]));
+        await attempt("newSession", () => ctx.newSession());
+        writeFileSync(file, JSON.stringify(results));
+    } });
+}"#;
+    let h = harness(Setup {
+        files: vec![("probe.ts", source.into())],
+        load: vec!["probe.ts"],
+        bind: false,
+        runtime: Some(ExtensionRuntime::QuickJs),
+        ..Setup::default()
+    })
+    .await;
+    *h.ui.editor_text.lock().unwrap() = "draft".into();
+    let message = "This capability is not available in the host";
+    let unsupported = Unsupported {
+        capabilities: vec![
+            Capability::NavigateTree,
+            Capability::Reload,
+            Capability::Custom,
+            Capability::Footer,
+            Capability::WidgetComponent,
+            Capability::EditorText,
+        ],
+        message: message.into(),
+    };
+    let bindings =
+        ExtensionBindings { ui: h.ui.clone(), unsupported: Some(unsupported), ..ExtensionBindings::default() };
+    h.session.bind_extensions(bindings).await;
+    let before = h.entries();
+    let file = h.cwd.join("probe.json");
+    let input = format!("/probe {}", file.display());
+    assert_eq!(h.session.prompt(&input, Vec::new()).await.unwrap(), PromptDisposition::Handled);
+    let results: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    for name in ["navigateTree", "reload", "custom", "footer", "widgetComponent", "editorText"] {
+        assert_eq!(results[name], json!({"error": message, "code": "ERR_PI_UNSUPPORTED"}), "{name}");
+    }
+    assert_eq!(results["widgetLines"], json!({"value": null}));
+    assert_eq!(results["newSession"], json!({"value": {"cancelled": false}}));
+    assert!(h.ui.calls.lock().unwrap().iter().any(|call| call == "widget(aboveEditor): lines=plain"));
+    assert!(!h.runner.is_stale());
+    assert_eq!(h.entries(), before);
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+}

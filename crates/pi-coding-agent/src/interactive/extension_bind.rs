@@ -123,6 +123,7 @@ impl InteractiveMode {
                     bridge.call(move |mode| mode.show_extension_error(&error));
                 }
             })),
+            unsupported: None,
         }
     }
 
