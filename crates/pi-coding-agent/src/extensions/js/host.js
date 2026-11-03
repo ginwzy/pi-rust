@@ -344,8 +344,12 @@ export function createHost(config) {
 			const [ctx, keep] = toolRenderContext(context, "result");
 			return keep(render(result, options, currentTheme(), ctx));
 		},
-		releaseToolRender(toolCallId) {
+		releaseToolRender(toolCallId, dispose = false) {
+			const entry = toolRenderState.get(toolCallId);
 			toolRenderState.delete(toolCallId);
+			if (dispose && entry) {
+				for (const component of new Set(Object.values(entry.last))) component?.dispose?.();
+			}
 		},
 		transformMarkdown(markdown, context) {
 			let text = markdown;
@@ -381,7 +385,11 @@ function toolRenderContext(context, slot) {
 		invalidate: () => call("ui.invalidateTool", context.toolCallId),
 	};
 	const keep = (component) => {
+		const previous = entry.last[slot];
 		entry.last[slot] = component ?? undefined;
+		if (context.disposePrevious && previous && previous !== component && !Object.values(entry.last).includes(previous)) {
+			previous.dispose?.();
+		}
 		return component ?? null;
 	};
 	return [ctx, keep];

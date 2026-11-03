@@ -277,6 +277,52 @@ impl ExtensionRunner {
         }
     }
 
+    /// Async hosts retain errors instead of treating a failed renderer as absent.
+    pub async fn tool_renderer_info_async(&self, tool_name: &str) -> Result<Option<ToolRendererInfo>, String> {
+        let info = self.call_json("toolRendererInfo", vec![json!(tool_name)]).await.map_err(|e| e.message)?;
+        Ok((!info.is_null()).then(|| ToolRendererInfo {
+            call: info["call"] == true,
+            result: info["result"] == true,
+            self_shell: info["shell"] == "self",
+        }))
+    }
+
+    /// Render one slot off the UI thread, disposing a replaced component. `None` selects call.
+    pub async fn render_tool_async(
+        &self,
+        tool_name: &str,
+        result: Option<&Value>,
+        request: &ToolRenderRequest,
+    ) -> Result<Option<JsComponent>, String> {
+        let mut context = request.context();
+        context["disposePrevious"] = json!(true);
+        let (method, args) = match result {
+            None => ("renderToolCall", vec![json!(tool_name), request.args.clone(), context]),
+            Some(result) => (
+                "renderToolResult",
+                vec![
+                    json!(tool_name),
+                    result.clone(),
+                    json!({"expanded": request.expanded, "isPartial": request.is_partial}),
+                    context,
+                ],
+            ),
+        };
+        self.host()
+            .call_method_opt_ref(method, values(args))
+            .await
+            .map(|component| component.map(JsComponent::new))
+            .map_err(|e| e.message)
+    }
+
+    /// Ordered release for async hosts; completes before this call id can be mounted again.
+    pub async fn release_tool_render_async(&self, tool_call_id: &str) -> Result<(), String> {
+        self.call_json("releaseToolRender", vec![json!(tool_call_id), json!(true)])
+            .await
+            .map(|_| ())
+            .map_err(|e| e.message)
+    }
+
     /// The extensions' Markdown transformers as one, or `None` when none is registered.
     pub fn markdown_transformer(self: &Arc<Self>) -> Option<MarkdownTransformer> {
         if self.registry().markdown_transformers == 0 {
