@@ -225,6 +225,39 @@ async fn api_methods_reach_the_session() {
     assert_eq!(h.session.model().map(|model| model.id), Some("other".to_string()));
 }
 
+const BUILTIN_TOOLS: &str = r#"import { createBashTool, createReadTool, createReadToolDefinition } from "@earendil-works/pi-coding-agent";
+export default function (pi) {
+	const read = createReadTool(process.cwd());
+	pi.registerTool({ ...createReadToolDefinition(process.cwd()), name: "read_copy", label: "Read copy" });
+	pi.registerCommand("describe", { handler: async (_args, ctx) => {
+		ctx.ui.notify(`${read.name} ${createBashTool(ctx.cwd).name}`);
+	} });
+}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn built_in_tool_factories_work_during_loading_and_after_binding() {
+    let h = harness(Setup {
+        files: vec![("builtin.ts", BUILTIN_TOOLS.into())],
+        load: vec!["builtin.ts"],
+        ..Setup::default()
+    })
+    .await;
+    assert_eq!(h.errors(), Vec::<String>::new());
+    let note = h.cwd.join("note.txt");
+    std::fs::write(&note, "hello from note\n").unwrap();
+    h.provider.push(FauxResponse::tool_call("c1", "read_copy", json!({"path": note.to_string_lossy()})));
+    h.provider.push(FauxResponse::text("done"));
+    let disposition = h.session.prompt("/describe", Vec::new()).await.unwrap();
+    assert_eq!(disposition.as_str(), "handled");
+    assert_eq!(h.ui.calls(), ["notify(info): read bash"]);
+    h.session.prompt("read it", Vec::new()).await.unwrap();
+    let transcript = h.transcript();
+    assert!(
+        transcript.iter().any(|line| line.starts_with("toolResult: ") && line.contains("hello from note")),
+        "{transcript:?}"
+    );
+}
+
 const SWITCH: &str = r#"export default function (pi) {
 	pi.registerCommand("switch", { handler: async (_args, ctx) => {
 		pi.setThinkingLevel("high");

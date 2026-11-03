@@ -91,9 +91,11 @@ pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> R
         "sdk" => super::ops_sdk::sync(runner, name, &args),
         "storage" => super::ops_sdk_storage::sync(runner, &runner.sdk.storage, &op, &args),
         "ui" => ops_ui::sync(runner, name, &args),
-        "ctx" | "session" | "models" | "tools" | "tool" | "action" | "prompt" | "boundary" => {
+        "ctx" | "session" | "models" | "tool" | "action" | "prompt" | "boundary" => {
             ops_session::sync(runner, &op, &args)
         }
+        // `tools.builtinInfo` describes a built-in tool and needs no session, even during loading.
+        "tools" if name == "callable" => ops_session::sync(runner, &op, &args),
         _ => ops_host::sync(runner, &op, &args),
     }
 }
