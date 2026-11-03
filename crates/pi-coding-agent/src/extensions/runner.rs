@@ -461,6 +461,8 @@ impl ExtensionRunner {
 
     /// Stop the JavaScript runtime and restore the APIs it replaced. Pending calls fail.
     pub fn shutdown(&self) {
+        // A queued shutdown cannot run while a synchronous extension call is stuck.
+        self.js.interrupt();
         self.sdk.shutdown();
         self.restore_apis();
         for (_, watcher) in lock(&self.watchers).drain() {
