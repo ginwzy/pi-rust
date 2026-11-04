@@ -25,6 +25,8 @@ pub struct LoadOptions {
     pub entries: Option<Vec<LoadEntry>>,
     /// `--extension-runtime`; `None` reads `PI_EXTENSION_RUNTIME`, then the settings.
     pub runtime: Option<super::backend::ExtensionRuntime>,
+    /// The `node` binary for the Node runtime; `None` reads `PI_NODE_PATH`, then `PATH`.
+    pub node: Option<std::path::PathBuf>,
 }
 
 #[derive(Default)]
@@ -44,7 +46,8 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
     if entries.is_empty() && options.inline.is_empty() {
         return LoadedExtensions::default();
     }
-    let (started, mut diagnostics) = super::backend::start_runner(services, options.runtime, &entries).await;
+    let (started, mut diagnostics) =
+        super::backend::start_runner(services, options.runtime, options.node.as_deref(), &entries).await;
     let runner = match started {
         Ok(runner) => runner,
         Err(error) => {

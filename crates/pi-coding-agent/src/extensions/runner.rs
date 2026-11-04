@@ -108,6 +108,8 @@ pub struct ExtensionRunner {
     backend: JsBackend,
     /// The `--extension-runtime` choice, passed on to the runner a reload starts.
     requested_runtime: OnceLock<ExtensionRuntime>,
+    /// The host's `node` binary, passed on to the runner a reload starts.
+    requested_node: OnceLock<PathBuf>,
     cwd: PathBuf,
     agent_dir: PathBuf,
     pub(crate) registry: RwLock<Registry>,
@@ -213,6 +215,7 @@ impl ExtensionRunner {
                 host: OnceLock::new(),
                 backend,
                 requested_runtime: OnceLock::new(),
+                requested_node: OnceLock::new(),
                 cwd: cwd.clone(),
                 agent_dir,
                 registry: RwLock::default(),
@@ -275,6 +278,14 @@ impl ExtensionRunner {
 
     pub(crate) fn set_requested_runtime(&self, runtime: ExtensionRuntime) {
         let _ = self.requested_runtime.set(runtime);
+    }
+
+    pub(crate) fn requested_node(&self) -> Option<PathBuf> {
+        self.requested_node.get().cloned()
+    }
+
+    pub(crate) fn set_requested_node(&self, node: PathBuf) {
+        let _ = self.requested_node.set(node);
     }
 
     pub fn cwd(&self) -> &Path {

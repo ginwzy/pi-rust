@@ -1,5 +1,5 @@
 //! Loading: order, failures, async factories, directories and manifests, settings entries,
-//! flags, and the `project_trust` pass.
+//! flags, the host's `node` binary, and the `project_trust` pass.
 
 use std::sync::Arc;
 
@@ -7,10 +7,12 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::agent_session::{CreateServicesOptions, create_agent_session_services};
 use pi_coding_agent::app::{AppOptions, extension_trust_decision};
 use pi_coding_agent::extension_ui::ExtensionMode;
+use pi_coding_agent::extensions::backend::ExtensionRuntime;
 use pi_coding_agent::extensions::{
-    LoadOptions, discover_extensions_in_dir, load_extensions, resolve_extension_entries,
+    LoadEntry, LoadOptions, discover_extensions_in_dir, load_extensions, resolve_extension_entries,
 };
 use pi_coding_agent::settings::SettingsManager;
+use pi_js::JsBackend;
 use serde_json::json;
 
 use crate::harness::{RecordingUi, Setup, harness};
@@ -285,4 +287,60 @@ async fn queued_input_runs_input_handlers_and_refuses_extension_commands() {
     );
     h.session.abort().await;
     let _ = running.await;
+}
+
+const EMPTY: &str = "export default function () {}\n";
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_host_node_binary_runs_extensions_and_survives_a_reload() {
+    let Some(found) = pi_js::node_backend::find_executable() else {
+        eprintln!("skipping: no node binary on PATH or in PI_NODE_PATH");
+        return;
+    };
+    let bin = tempfile::tempdir().unwrap();
+    let node = bin.path().join("host-node");
+    std::os::unix::fs::symlink(&found, &node).unwrap();
+    let h = harness(Setup {
+        files: vec![("empty.ts", EMPTY.into())],
+        load: vec!["empty.ts"],
+        from_settings: true,
+        runtime: Some(ExtensionRuntime::Node),
+        node: Some(node.clone()),
+        ..Setup::default()
+    })
+    .await;
+    assert_eq!(h.runner.backend(), &JsBackend::Node { executable: node.clone() });
+    h.session.reload_extensions().await.unwrap();
+    let reloaded = h.session.extension_runner().expect("reloaded runner");
+    assert!(!Arc::ptr_eq(&reloaded, &h.runner));
+    assert_eq!(reloaded.backend(), &JsBackend::Node { executable: node });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missing_host_node_binary_falls_back_to_quickjs_without_searching_path() {
+    let root = tempfile::tempdir().unwrap();
+    let (cwd, agent_dir) = (root.path().join("work"), root.path().join("agent"));
+    std::fs::create_dir_all(&cwd).unwrap();
+    std::fs::create_dir_all(&agent_dir).unwrap();
+    let file = root.path().join("empty.ts");
+    std::fs::write(&file, EMPTY).unwrap();
+    let services = create_agent_session_services(CreateServicesOptions::new(&cwd, &agent_dir)).await;
+    let missing = root.path().join("missing/node");
+    let options = LoadOptions {
+        entries: Some(vec![LoadEntry::file(&file)]),
+        runtime: Some(ExtensionRuntime::Node),
+        node: Some(missing.clone()),
+        ..LoadOptions::default()
+    };
+    let loaded = load_extensions(&services, &options).await;
+    let runner = loaded.runner.expect("runner");
+    assert_eq!(runner.backend(), &JsBackend::QuickJs);
+    let messages: Vec<&str> = loaded.diagnostics.iter().map(|diagnostic| diagnostic.message.as_str()).collect();
+    assert!(
+        messages.iter().any(|message| message.starts_with("Cannot run extensions on Node")
+            && message.contains(&missing.display().to_string())),
+        "{messages:?}"
+    );
+    runner.shutdown();
 }

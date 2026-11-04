@@ -97,18 +97,26 @@ fn skip_dir(parent: &Path, name: &std::ffi::OsStr) -> bool {
     name == ".git" || (name == ".bin" && parent.file_name().is_some_and(|parent| parent == "node_modules"))
 }
 
-/// The backend for `runtime`, or why Node cannot run when it was asked for.
-pub fn select_backend(runtime: ExtensionRuntime, entries: &[LoadEntry]) -> Result<JsBackend, String> {
+/// The backend for `runtime`, or why Node cannot run when it was asked for. `node` replaces the
+/// `PI_NODE_PATH` and `PATH` lookup.
+pub fn select_backend(
+    runtime: ExtensionRuntime,
+    entries: &[LoadEntry],
+    node: Option<&Path>,
+) -> Result<JsBackend, String> {
     match runtime {
         ExtensionRuntime::QuickJs => Ok(JsBackend::QuickJs),
         ExtensionRuntime::Auto if !wants_node(entries) => Ok(JsBackend::QuickJs),
-        ExtensionRuntime::Node | ExtensionRuntime::Auto => node_backend(),
+        ExtensionRuntime::Node | ExtensionRuntime::Auto => node_backend(node),
     }
 }
 
-fn node_backend() -> Result<JsBackend, String> {
-    let executable = find_executable()
-        .ok_or_else(|| format!("Node {MIN_NODE_MAJOR} or later was not found on PATH or in {NODE_PATH_ENV}"))?;
+fn node_backend(node: Option<&Path>) -> Result<JsBackend, String> {
+    let executable = match node {
+        Some(node) => node.to_path_buf(),
+        None => find_executable()
+            .ok_or_else(|| format!("Node {MIN_NODE_MAJOR} or later was not found on PATH or in {NODE_PATH_ENV}"))?,
+    };
     probe(&executable).map_err(|error| error.to_string())?;
     Ok(JsBackend::Node { executable })
 }
@@ -117,16 +125,18 @@ fn fallback_warning(reason: &str) -> RuntimeDiagnostic {
     RuntimeDiagnostic::warning(format!("Cannot run extensions on Node: {reason}. Using QuickJS."))
 }
 
-/// Start the runner on the resolved backend. `requested` is the CLI choice, kept for reloads.
+/// Start the runner on the resolved backend. `requested` is the CLI choice and `node` the host's
+/// `node` binary, both kept for reloads.
 pub(crate) async fn start_runner(
     services: &AgentSessionServices,
     requested: Option<ExtensionRuntime>,
+    node: Option<&Path>,
     entries: &[LoadEntry],
 ) -> (anyhow::Result<Arc<ExtensionRunner>>, Vec<RuntimeDiagnostic>) {
     let env = pi_ai::env::process_env_value(RUNTIME_ENV);
     let (runtime, env_warning) = resolve_runtime(requested, env.as_deref(), services.settings.extension_runtime());
     let mut diagnostics: Vec<RuntimeDiagnostic> = env_warning.into_iter().map(RuntimeDiagnostic::warning).collect();
-    let backend = select_backend(runtime, entries).unwrap_or_else(|reason| {
+    let backend = select_backend(runtime, entries, node).unwrap_or_else(|reason| {
         diagnostics.push(fallback_warning(&reason));
         JsBackend::QuickJs
     });
@@ -139,8 +149,13 @@ pub(crate) async fn start_runner(
         }
         started => started,
     };
-    if let (Ok(runner), Some(requested)) = (&started, requested) {
-        runner.set_requested_runtime(requested);
+    if let Ok(runner) = &started {
+        if let Some(requested) = requested {
+            runner.set_requested_runtime(requested);
+        }
+        if let Some(node) = node {
+            runner.set_requested_node(node.to_path_buf());
+        }
     }
     (started, diagnostics)
 }
@@ -211,7 +226,7 @@ mod tests {
         assert!(!wants_node(&entry(deep.join("index.ts"))));
         assert!(!wants_node(&entry(loose)));
         assert!(wants_node(&[LoadEntry::file(plain.join("extensions/index.ts")), LoadEntry::file(declared)]));
-        assert_eq!(select_backend(Auto, &entry(plain.join("extensions/index.ts"))), Ok(JsBackend::QuickJs));
-        assert_eq!(select_backend(QuickJs, &entry(addon.join("src/ext/index.ts"))), Ok(JsBackend::QuickJs));
+        assert_eq!(select_backend(Auto, &entry(plain.join("extensions/index.ts")), None), Ok(JsBackend::QuickJs));
+        assert_eq!(select_backend(QuickJs, &entry(addon.join("src/ext/index.ts")), None), Ok(JsBackend::QuickJs));
     }
 }
