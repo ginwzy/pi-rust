@@ -160,7 +160,13 @@ impl ExtensionRunner {
             return;
         }
         for (extension_path, error) in self.mcp.take_unconnected_reports() {
-            self.emit_error(ExtensionError { extension_path, event: "register_mcp_server".into(), error, stack: None });
+            self.emit_error(ExtensionError {
+                extension_path,
+                event: "register_mcp_server".into(),
+                error,
+                stack: None,
+                code: None,
+            });
         }
     }
 

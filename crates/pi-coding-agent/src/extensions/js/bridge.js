@@ -56,6 +56,10 @@ export function errorStack(error) {
 	return error instanceof Error ? error.stack : undefined;
 }
 
+export function errorCode(error) {
+	return typeof error?.code === "string" ? error.code : undefined;
+}
+
 // Callbacks Rust invokes by key (tool updates, `done` of custom UI, streamed provider events).
 const callbacks = new Map();
 let nextCallback = 1;

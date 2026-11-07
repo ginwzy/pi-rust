@@ -282,6 +282,7 @@ pub async fn harness(setup: Setup) -> Harness {
             event: "load".into(),
             error: error.error,
             stack: None,
+            code: None,
         });
     }
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));

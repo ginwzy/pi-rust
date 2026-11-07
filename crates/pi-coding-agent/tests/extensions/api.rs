@@ -543,3 +543,59 @@ export default function (pi) {
     assert_eq!(h.entries(), before);
     assert!(h.errors().is_empty(), "{:?}", h.errors());
 }
+
+/// A refused capability that reaches the host uncaught keeps its code, so the host can tell it
+/// from the extension's own failures; other errors have none.
+#[tokio::test(flavor = "multi_thread")]
+async fn uncaught_errors_keep_the_code_they_were_thrown_with() {
+    use pi_coding_agent::extensions::{Capability, ExtensionBindings, ExtensionError, Unsupported};
+    use std::sync::{Arc, Mutex};
+    let source = r#"export default function (pi) {
+    pi.on("session_start", (_, ctx) => { ctx.ui.getEditorText(); });
+    pi.registerCommand("refused", { handler: async (_, ctx) => { await ctx.reload(); } });
+    pi.registerCommand("broken", { handler: async () => { throw new Error("broken on purpose"); } });
+}"#;
+    let other = r#"export default function (pi) {
+    pi.registerCommand("broken", { handler: async () => { throw new Error("other extension"); } });
+}"#;
+    let h = harness(Setup {
+        files: vec![("errors.ts", source.into()), ("other.ts", other.into())],
+        load: vec!["errors.ts", "other.ts"],
+        bind: false,
+        ..Setup::default()
+    })
+    .await;
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    let sink = errors.clone();
+    let unsupported =
+        Unsupported { capabilities: vec![Capability::Reload, Capability::EditorText], message: "refused".into() };
+    let bindings = ExtensionBindings {
+        ui: h.ui.clone(),
+        unsupported: Some(unsupported),
+        on_error: Some(Arc::new(move |error: &ExtensionError| sink.lock().unwrap().push(error.clone()))),
+        ..ExtensionBindings::default()
+    };
+    h.session.bind_extensions(bindings).await;
+    for command in ["/refused", "/broken:1", "/broken:2"] {
+        assert_eq!(h.session.prompt(command, Vec::new()).await.unwrap(), PromptDisposition::Handled);
+    }
+    let errors = errors.lock().unwrap().clone();
+    let first = h.extension_dir.join("errors.ts").display().to_string();
+    let second = h.extension_dir.join("other.ts").display().to_string();
+    let found: Vec<_> = errors
+        .iter()
+        .map(|error| (error.extension_path.as_str(), error.event.as_str(), error.code.as_deref()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (first.as_str(), "session_start", Some("ERR_PI_UNSUPPORTED")),
+            (first.as_str(), "command", Some("ERR_PI_UNSUPPORTED")),
+            (first.as_str(), "command", None),
+            (second.as_str(), "command", None),
+        ]
+    );
+    assert_eq!(errors[2].error, "broken on purpose");
+    assert_eq!(errors[3].error, "other extension");
+    assert!(errors.iter().all(|error| error.stack.is_some()));
+}

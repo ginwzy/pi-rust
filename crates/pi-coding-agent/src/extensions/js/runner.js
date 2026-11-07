@@ -1,7 +1,7 @@
 // Event dispatch (upstream `core/extensions/runner.ts`): handlers run in load order, failures are
 // reported as extension errors, and each event combines handler results as upstream does.
 import { getCurrentSystemMessage } from "../pi-ai/src/utils/transcript.ts";
-import { call, callAsync, errorMessage, errorStack } from "./bridge.js";
+import { call, callAsync, errorCode, errorMessage, errorStack } from "./bridge.js";
 import { createCommandContext, createContext, createToolContext } from "./context.js";
 
 export const STALE_MESSAGE =
@@ -68,11 +68,18 @@ export class Runner {
 			event: error.event,
 			error: error.error,
 			stack: error.stack ?? null,
+			code: error.code ?? null,
 		});
 	}
 
 	reportFailure(ext, event, error) {
-		this.emitError({ extensionPath: ext.path, event, error: errorMessage(error), stack: errorStack(error) });
+		this.emitError({
+			extensionPath: ext.path,
+			event,
+			error: errorMessage(error),
+			stack: errorStack(error),
+			code: errorCode(error),
+		});
 	}
 
 	hasHandlers(type) {
@@ -426,6 +433,7 @@ export class Runner {
 						event: baseEvent.type,
 						error: `Invalid boundary entries: ${errorMessage(error)}`,
 						stack: errorStack(error),
+						code: errorCode(error),
 					});
 				}
 			}

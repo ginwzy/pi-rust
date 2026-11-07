@@ -58,6 +58,7 @@ impl ExtensionTool {
                     event: method.into(),
                     error: error.message,
                     stack: error.stack,
+                    code: None,
                 });
                 None
             }

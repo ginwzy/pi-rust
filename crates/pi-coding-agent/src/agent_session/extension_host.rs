@@ -513,6 +513,7 @@ impl AgentSession {
                     event: "load".into(),
                     error: diagnostic.message.clone(),
                     stack: None,
+                    code: None,
                 });
             }
         }

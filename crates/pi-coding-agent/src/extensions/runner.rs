@@ -31,6 +31,8 @@ pub struct ExtensionError {
     pub event: String,
     pub error: String,
     pub stack: Option<String>,
+    /// The thrown error's `code`, such as `ERR_PI_UNSUPPORTED` for a capability the host refuses.
+    pub code: Option<String>,
 }
 
 /// An extension that could not load.

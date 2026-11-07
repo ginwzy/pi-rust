@@ -322,6 +322,7 @@ impl AgentSession {
                 event: "turn_end".into(),
                 error: "turn_end could not resolve the persisted assistant entry ID".into(),
                 stack: None,
+                code: None,
             });
             return false;
         };
@@ -374,6 +375,7 @@ fn report_invalid_continuation(runner: &ExtensionRunner, event: &str) {
         event: event.into(),
         error: format!("{event} requested continuation without runnable model context"),
         stack: None,
+        code: None,
     });
 }
 

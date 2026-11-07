@@ -184,6 +184,7 @@ fn report(runner: &ExtensionRunner, event: &str) -> impl Fn(anyhow::Error) + Sen
                 event: event.clone(),
                 error,
                 stack: None,
+                code: None,
             });
         }
     }

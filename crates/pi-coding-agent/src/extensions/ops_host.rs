@@ -116,6 +116,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
                 event: text("event"),
                 error: text("error"),
                 stack: record["stack"].as_str().map(str::to_string),
+                code: record["code"].as_str().map(str::to_string),
             });
             Value::Null
         }
