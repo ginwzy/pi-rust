@@ -2,7 +2,7 @@
 //! `autocompleteProviderWrappers`). The chain runs in JavaScript over a proxy of the built-in
 //! provider; cursor columns cross as UTF-16 indices.
 
-use pi_js::{HostValue, JsRef};
+use pi_js::{HostValue, JsError, JsRef};
 use pi_tui::AutocompleteItem;
 use pi_tui::autocomplete::{
     AutocompleteProvider, AutocompleteSuggestions, CompletionResult, SuggestionOptions, SuggestionsFuture,
@@ -21,6 +21,61 @@ pub struct JsAutocompleteProvider {
 }
 
 impl JsAutocompleteProvider {
+    pub async fn cancel_async(&self) -> Result<(), JsError> {
+        self.host.call_method("autocompleteCancel", vec![HostValue::Ref(self.chain.clone())]).await?;
+        Ok(())
+    }
+    /// Build a provider without blocking the caller's executor.
+    pub async fn build_async(factories: &[ComponentFactory]) -> Result<Self, String> {
+        let first = factories.first().ok_or("No autocomplete providers")?;
+        let host = first.host()?;
+        let ids: Vec<u64> = factories.iter().map(ComponentFactory::id).collect();
+        let args = vec![HostValue::Json(json!(first.target())), HostValue::Json(json!(ids))];
+        let chain = host
+            .call_method_opt_ref("autocompleteChain", args)
+            .await
+            .map_err(|error| error.display_with_stack())?
+            .ok_or("The autocomplete chain is empty")?;
+        let triggers = chain
+            .get("triggerCharacters")
+            .await
+            .ok()
+            .and_then(|value| serde_json::from_value(value.into_json()).ok())
+            .unwrap_or_default();
+        Ok(Self { host, chain, triggers })
+    }
+
+    /// A headless host keeps errors instead of silently treating them as an empty list.
+    pub async fn suggest_async(
+        &self,
+        lines: &[String],
+        cursor_line: usize,
+        cursor_col: usize,
+        force: bool,
+    ) -> Result<Option<AutocompleteSuggestions>, JsError> {
+        let col = byte_to_utf16(line(lines, cursor_line), cursor_col);
+        let args = self.args("getSuggestions", json!([lines, cursor_line, col, {"force": force}]));
+        let result = self.host.call_method("autocomplete", args).await?.into_json();
+        Ok(parse_suggestions(&result))
+    }
+
+    pub async fn apply_async(
+        &self,
+        lines: &[String],
+        cursor_line: usize,
+        cursor_col: usize,
+        item: &AutocompleteItem,
+        prefix: &str,
+    ) -> Result<CompletionResult, JsError> {
+        let col = byte_to_utf16(line(lines, cursor_line), cursor_col);
+        let args = self.args("applyCompletion", json!([lines, cursor_line, col, item_json(item), prefix]));
+        let value = self.host.call_method("autocomplete", args).await?.into_json();
+        if value.is_null() {
+            return Ok(apply_default_completion(lines, cursor_line, cursor_col, item, prefix));
+        }
+        parse_completion(&value)
+    }
+
     /// Apply `factories` (all of one extension host) in order; `Err` when the host is gone or a
     /// factory throws.
     pub fn build(factories: &[ComponentFactory]) -> Result<Self, String> {
@@ -56,6 +111,22 @@ fn line(lines: &[String], index: usize) -> &str {
 
 fn item_json(item: &AutocompleteItem) -> Value {
     json!({"value": item.value, "label": item.label, "description": item.description})
+}
+
+fn parse_completion(value: &Value) -> Result<CompletionResult, JsError> {
+    let lines: Vec<String> = serde_json::from_value(value["lines"].clone()).map_err(|e| JsError::new(e.to_string()))?;
+    let cursor_line =
+        value["cursorLine"].as_u64().ok_or_else(|| JsError::new("Invalid completion cursor line"))? as usize;
+    let text = lines.get(cursor_line).ok_or_else(|| JsError::new("Completion cursor outside text"))?;
+    let col = value["cursorCol"].as_u64().ok_or_else(|| JsError::new("Invalid completion cursor column"))? as usize;
+    if col > text.encode_utf16().count() {
+        return Err(JsError::new("Completion cursor outside line"));
+    }
+    let cursor_col = utf16_to_byte(text, col);
+    if byte_to_utf16(text, cursor_col) != col {
+        return Err(JsError::new("Completion cursor splits a character"));
+    }
+    Ok(CompletionResult { lines, cursor_line, cursor_col })
 }
 
 /// `{ items, prefix }` from JavaScript.
@@ -107,12 +178,7 @@ impl AutocompleteProvider for JsAutocompleteProvider {
     ) -> CompletionResult {
         let col = byte_to_utf16(line(lines, cursor_line), cursor_col);
         let applied = self.blocking("applyCompletion", json!([lines, cursor_line, col, item_json(item), prefix]));
-        let parsed = applied.and_then(|value| {
-            let lines: Vec<String> = serde_json::from_value(value["lines"].clone()).ok()?;
-            let cursor_line = value["cursorLine"].as_u64()? as usize;
-            let cursor_col = utf16_to_byte(line(&lines, cursor_line), value["cursorCol"].as_u64()? as usize);
-            Some(CompletionResult { lines, cursor_line, cursor_col })
-        });
+        let parsed = applied.and_then(|value| parse_completion(&value).ok());
         parsed.unwrap_or_else(|| apply_default_completion(lines, cursor_line, cursor_col, item, prefix))
     }
 

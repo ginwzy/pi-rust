@@ -423,6 +423,57 @@ async fn merged_autocomplete_adds_pi_suggestions_after_the_extension_items() {
     assert_eq!(suggestions.prefix, "@na");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn headless_autocomplete_preserves_unicode_errors_and_cancellation() {
+    let source = r##"export default function(pi) {
+        pi.on("session_start", (_, ctx) => ctx.ui.addAutocompleteProvider(current => ({
+            getSuggestions: async (lines, row, col, options) => {
+                if (lines[row].endsWith("#slow")) {
+                    await new Promise(resolve => options.signal.addEventListener("abort", resolve, {once:true}));
+                    return null;
+                }
+                if (lines[row].endsWith("#error")) {
+                    const error = new Error("completion failed"); error.code = "ERR_COMPLETION"; throw error;
+                }
+                return current.getSuggestions(lines, row, col, options);
+            },
+            applyCompletion: (lines, row, col, item, prefix) => item.value === "bad"
+                ? {lines:["😀"], cursorLine:0, cursorCol:1}
+                : current.applyCompletion(lines, row, col, item, prefix),
+        })));
+    }"##;
+    let ui = Arc::new(NativeUi::default());
+    let h = harness(Setup {
+        files: vec![("headless.ts", source.into())],
+        load: vec!["headless.ts"],
+        bind: false,
+        ..Setup::default()
+    })
+    .await;
+    h.session
+        .bind_extensions(ExtensionBindings { ui: ui.clone(), mode: ExtensionMode::Rpc, ..ExtensionBindings::default() })
+        .await;
+    let factories = ui.autocomplete.lock().unwrap().clone();
+    let provider = JsAutocompleteProvider::build_async(&factories).await.unwrap();
+    let text = "中文😀 @na";
+    let lines = vec![text.into()];
+    let suggestions = provider.suggest_async(&lines, 0, text.len(), false).await.unwrap().unwrap();
+    assert!(suggestions.items.iter().any(|item| item.value == "@pi-own"));
+    let applied =
+        provider.apply_async(&lines, 0, text.len(), &AutocompleteItem::new("@pi-own", "file"), "@na").await.unwrap();
+    assert_eq!(applied.lines, ["中文😀 @pi-own "]);
+    assert_eq!(applied.cursor_col, applied.lines[0].len());
+    assert!(provider.apply_async(&lines, 0, text.len(), &AutocompleteItem::new("bad", "bad"), "@na").await.is_err());
+    let error = provider.suggest_async(&["#error".into()], 0, 6, false).await.unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("ERR_COMPLETION"));
+    let slow = vec!["#slow".into()];
+    let (result, ()) = tokio::join!(provider.suggest_async(&slow, 0, 5, false), async {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        provider.cancel_async().await.unwrap();
+    },);
+    assert!(result.unwrap().is_none());
+}
+
 fn footer_reads(ui: &NativeUi) -> usize {
     ui.footer_reads.load(std::sync::atomic::Ordering::SeqCst)
 }

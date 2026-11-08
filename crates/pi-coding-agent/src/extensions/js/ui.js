@@ -265,7 +265,20 @@ export function autocompleteChain(target, ids) {
 export async function autocomplete(chain, method, args) {
 	const provider = chain.provider;
 	if (typeof provider[method] !== "function") return null;
-	return (await provider[method](...args)) ?? null;
+	if (method !== "getSuggestions") return (await provider[method](...args)) ?? null;
+	const controller = new AbortController();
+	chain.controller?.abort();
+	chain.controller = controller;
+	args[3] = { ...args[3], signal: controller.signal };
+	try {
+		return (await provider[method](...args)) ?? null;
+	} finally {
+		if (chain.controller === controller) chain.controller = undefined;
+	}
+}
+
+export function autocompleteCancel(chain) {
+	chain.controller?.abort();
 }
 
 export { invokeCallback };

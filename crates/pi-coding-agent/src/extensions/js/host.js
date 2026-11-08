@@ -309,6 +309,7 @@ export function createHost(config) {
 		createComponent: ui.createComponent,
 		autocompleteChain: ui.autocompleteChain,
 		autocomplete: ui.autocomplete,
+		autocompleteCancel: ui.autocompleteCancel,
 		terminalInput: ui.terminalInput,
 		renderMessage(customType, message, options) {
 			const renderer = firstPerName("messageRenderers").get(customType);
