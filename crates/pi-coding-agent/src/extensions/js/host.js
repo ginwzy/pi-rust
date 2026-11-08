@@ -2,7 +2,7 @@
 // providers, and virtual models to the Rust extension host through `createHost()`.
 import { createEventBus, createExtension, createExtensionAPI, createRuntime } from "./api.js";
 import * as bridge from "./bridge.js";
-import { call, callAsync, errorCode, errorMessage, errorStack, optional, registerCallback, releaseCallback, signalFor } from "./bridge.js";
+import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor } from "./bridge.js";
 import { nativeFactory } from "./native.js";
 import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
@@ -227,13 +227,7 @@ export function createHost(config) {
 			try {
 				await command.handler(args, runner.createCommandContext());
 			} catch (error) {
-				runner.emitError({
-					extensionPath: command.extensionPath,
-					event: "command",
-					error: errorMessage(error),
-					stack: errorStack(error),
-					code: errorCode(error),
-				});
+				runner.reportFailure(command.extensionPath, "command", error);
 			}
 			return true;
 		},
@@ -249,7 +243,7 @@ export function createHost(config) {
 			try {
 				await entry.handler(runner.createContext());
 			} catch (error) {
-				runner.emitError({ extensionPath, event: "shortcut", error: errorMessage(error), code: errorCode(error) });
+				runner.reportFailure(extensionPath, "shortcut", error);
 			}
 			return true;
 		},
@@ -366,12 +360,7 @@ export function createHost(config) {
 				try {
 					text = ext.markdownTransformer(text, context) ?? text;
 				} catch (error) {
-					runner.emitError({
-						extensionPath: ext.path,
-						event: "markdown_transform",
-						error: errorMessage(error),
-						code: errorCode(error),
-					});
+					runner.reportFailure(ext.path, "markdown_transform", error);
 				}
 			}
 			return text;

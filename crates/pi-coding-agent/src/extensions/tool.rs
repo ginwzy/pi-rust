@@ -9,11 +9,12 @@ use pi_agent::{
     AgentTool, AgentToolResult, ToolAnnotations, ToolContext, ToolExecutionMode, ToolExposure, ToolLoadout,
     ToolLoadoutChanges, ToolNamespace, ToolReach, ToolUpdateCallback,
 };
+use pi_js::{JsError, UNSUPPORTED_CODE};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::registry::ToolDescriptor;
-use super::runner::ExtensionRunner;
+use super::runner::{ExtensionError, ExtensionRunner};
 use crate::agent_session::lock;
 
 /// How long synchronous hooks (`prepareArguments`, `prepareLoadout`) may take.
@@ -53,16 +54,20 @@ impl ExtensionTool {
         match runner.host().blocking_call_method_within(method, args, HOOK_TIMEOUT) {
             Ok(value) => Some(value.into_json()),
             Err(error) => {
-                runner.emit_error(super::runner::ExtensionError {
-                    extension_path: self.descriptor.extension_path.clone(),
-                    event: method.into(),
-                    error: error.message,
-                    stack: error.stack,
-                    code: None,
-                });
+                runner.emit_error(ExtensionError::from_js(&self.descriptor.extension_path, method, &error));
                 None
             }
         }
+    }
+
+    fn tool_error(&self, event: &str, error: JsError) -> anyhow::Error {
+        // Expected tool failures stay in the tool result; refused capabilities also reach the host.
+        if error.code.as_deref() == Some(UNSUPPORTED_CODE)
+            && let Some(runner) = self.runner.upgrade()
+        {
+            runner.emit_error(ExtensionError::from_js(&self.descriptor.extension_path, event, &error));
+        }
+        anyhow::anyhow!(error.message)
     }
 }
 
@@ -185,7 +190,7 @@ impl AgentTool for ExtensionTool {
         let runner = self.runner.upgrade().ok_or_else(|| anyhow::anyhow!("The extension host has shut down"))?;
         let call_args = vec![json!(self.descriptor.name).into(), args.into()];
         let prepared = runner.host().blocking_call_method_within("prepareArguments", call_args, HOOK_TIMEOUT);
-        prepared.map(pi_js::HostValue::into_json).map_err(|error| anyhow::anyhow!(error.message))
+        prepared.map(pi_js::HostValue::into_json).map_err(|error| self.tool_error("prepareArguments", error))
     }
 
     fn prepare_loadout(&self, loadout: &ToolLoadout) -> Option<ToolLoadoutChanges> {
@@ -233,7 +238,7 @@ impl AgentTool for ExtensionTool {
         lock(&runner.nested).remove(&call_id);
         lock(&runner.updates).remove(&update_key);
         runner.release_signal(signal);
-        let value = result.map_err(|error| anyhow::anyhow!(error.message))?;
+        let value = result.map_err(|error| self.tool_error("execute", error))?;
         serde_json::from_value(value).map_err(|error| anyhow::anyhow!("Invalid tool result: {error}"))
     }
 }

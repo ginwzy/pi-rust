@@ -457,20 +457,22 @@ impl AgentSession {
 
     /// Unload extensions after `session_shutdown` (reload, replacement, or quit).
     pub(crate) async fn shutdown_extensions(&self, reason: &str, target: Option<&str>) {
-        self.emit_session_shutdown(reason, target).await;
+        let _ = self.emit_session_shutdown(reason, target).await;
         self.invalidate_extensions().await;
     }
 
-    /// `session_shutdown` to the extensions (upstream `emitSessionShutdownEvent`).
-    pub(crate) async fn emit_session_shutdown(&self, reason: &str, target: Option<&str>) {
-        let Some(runner) = self.extension_runner() else { return };
+    /// Emit `session_shutdown` before the host disposes its UI and session. Handler exceptions
+    /// go through `on_error`; failure of the JavaScript runtime is returned to the host.
+    pub async fn emit_session_shutdown(&self, reason: &str, target: Option<&str>) -> Result<(), pi_js::JsError> {
+        let Some(runner) = self.extension_runner() else { return Ok(()) };
         if runner.has_handlers("session_shutdown") {
             let mut event = json!({"type": "session_shutdown", "reason": reason});
             if let Some(target) = target {
                 event["targetSessionFile"] = json!(target);
             }
-            runner.emit(event).await;
+            runner.call_json("emit", vec![event]).await?;
         }
+        Ok(())
     }
 
     /// Make the extension contexts of this session stale.

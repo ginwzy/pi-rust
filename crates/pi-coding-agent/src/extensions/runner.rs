@@ -35,6 +35,18 @@ pub struct ExtensionError {
     pub code: Option<String>,
 }
 
+impl ExtensionError {
+    pub fn from_js(extension_path: impl Into<String>, event: impl Into<String>, error: &JsError) -> Self {
+        Self {
+            extension_path: extension_path.into(),
+            event: event.into(),
+            error: error.message.clone(),
+            stack: error.stack.clone(),
+            code: error.code.clone(),
+        }
+    }
+}
+
 /// An extension that could not load.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExtensionLoadError {

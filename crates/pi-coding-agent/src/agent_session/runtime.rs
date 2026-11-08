@@ -185,7 +185,7 @@ impl AgentSessionRuntime {
         let session = self.session();
         let target = target.map(|path| path.display().to_string());
         session.abort().await;
-        session.emit_session_shutdown(reason, target.as_deref()).await;
+        let _ = session.emit_session_shutdown(reason, target.as_deref()).await;
         let before_invalidate = lock(&self.before_invalidate).clone();
         if let Some(before_invalidate) = before_invalidate {
             before_invalidate().await;

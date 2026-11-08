@@ -551,9 +551,19 @@ async fn uncaught_errors_keep_the_code_they_were_thrown_with() {
     use pi_coding_agent::extensions::{Capability, ExtensionBindings, ExtensionError, Unsupported};
     use std::sync::{Arc, Mutex};
     let source = r#"export default function (pi) {
-    pi.on("session_start", (_, ctx) => { ctx.ui.getEditorText(); });
+    let context;
+    pi.on("session_start", (_, ctx) => { context = ctx; ctx.ui.getEditorText(); });
     pi.registerCommand("refused", { handler: async (_, ctx) => { await ctx.reload(); } });
     pi.registerCommand("broken", { handler: async () => { throw new Error("broken on purpose"); } });
+    pi.registerTool({ name: "refused_tool", label: "Refused", description: "Probe failures",
+        parameters: { type: "object", properties: {} },
+        reachesTools: () => context.ui.getEditorText(),
+        prepareArguments: () => context.ui.getEditorText(),
+        execute: (_, args, _signal, _update, ctx) => {
+            if (args.ordinary) throw new Error("ordinary tool failure");
+            return ctx.ui.getEditorText();
+        },
+    });
 }"#;
     let other = r#"export default function (pi) {
     pi.registerCommand("broken", { handler: async () => { throw new Error("other extension"); } });
@@ -579,6 +589,13 @@ async fn uncaught_errors_keep_the_code_they_were_thrown_with() {
     for command in ["/refused", "/broken:1", "/broken:2"] {
         assert_eq!(h.session.prompt(command, Vec::new()).await.unwrap(), PromptDisposition::Handled);
     }
+    let tool = h.session.tool("refused_tool").unwrap();
+    tool.reaches_tools(&json!({}));
+    assert_eq!(tool.prepare_arguments(json!({})).unwrap_err().to_string(), "refused");
+    for (args, expected) in [(json!({}), "refused"), (json!({"ordinary": true}), "ordinary tool failure")] {
+        let result = tool.execute("probe", args, tokio_util::sync::CancellationToken::new(), Arc::new(|_| {})).await;
+        assert_eq!(result.unwrap_err().to_string(), expected);
+    }
     let errors = errors.lock().unwrap().clone();
     let first = h.extension_dir.join("errors.ts").display().to_string();
     let second = h.extension_dir.join("other.ts").display().to_string();
@@ -593,9 +610,13 @@ async fn uncaught_errors_keep_the_code_they_were_thrown_with() {
             (first.as_str(), "command", Some("ERR_PI_UNSUPPORTED")),
             (first.as_str(), "command", None),
             (second.as_str(), "command", None),
+            (first.as_str(), "reachesTools", Some("ERR_PI_UNSUPPORTED")),
+            (first.as_str(), "prepareArguments", Some("ERR_PI_UNSUPPORTED")),
+            (first.as_str(), "execute", Some("ERR_PI_UNSUPPORTED")),
         ]
     );
     assert_eq!(errors[2].error, "broken on purpose");
     assert_eq!(errors[3].error, "other extension");
     assert!(errors.iter().all(|error| error.stack.is_some()));
+    assert!(h.provider.requests().is_empty());
 }

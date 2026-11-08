@@ -72,9 +72,9 @@ export class Runner {
 		});
 	}
 
-	reportFailure(ext, event, error) {
+	reportFailure(extensionPath, event, error) {
 		this.emitError({
-			extensionPath: ext.path,
+			extensionPath,
 			event,
 			error: errorMessage(error),
 			stack: errorStack(error),
@@ -145,7 +145,7 @@ export class Runner {
 						if (result.cancel) return result;
 					}
 				} catch (error) {
-					this.reportFailure(ext, event.type, error);
+					this.reportFailure(ext.path, event.type, error);
 				}
 			}
 		}
@@ -161,7 +161,7 @@ export class Runner {
 					const result = await handler(event, ctx);
 					if (result?.action !== undefined) action = result.action;
 				} catch (error) {
-					this.reportFailure(ext, event.type, error);
+					this.reportFailure(ext.path, event.type, error);
 				}
 			}
 		}
@@ -188,7 +188,7 @@ export class Runner {
 					current = result.message;
 					modified = true;
 				} catch (error) {
-					this.reportFailure(ext, "message_end", error);
+					this.reportFailure(ext.path, "message_end", error);
 				}
 			}
 		}
@@ -219,7 +219,7 @@ export class Runner {
 						}
 					}
 				} catch (error) {
-					this.reportFailure(ext, "tool_result", error);
+					this.reportFailure(ext.path, "tool_result", error);
 				}
 			}
 		}
@@ -258,7 +258,7 @@ export class Runner {
 					}
 					return result;
 				} catch (error) {
-					this.reportFailure(ext, "user_bash", error);
+					this.reportFailure(ext.path, "user_bash", error);
 					throw error;
 				}
 			}
@@ -279,7 +279,7 @@ export class Runner {
 					if (!returned) continue;
 					current = restoreSystemMessages(current, visibleSnapshot, returned);
 				} catch (error) {
-					this.reportFailure(ext, "context", error);
+					this.reportFailure(ext.path, "context", error);
 				}
 			}
 		}
@@ -297,7 +297,7 @@ export class Runner {
 						});
 					}
 				} catch (error) {
-					this.reportFailure(ext, "context_with_system", error);
+					this.reportFailure(ext.path, "context_with_system", error);
 				}
 			}
 		}
@@ -313,7 +313,7 @@ export class Runner {
 					const result = await handler({ type: "before_provider_request", payload: current }, ctx);
 					if (result !== undefined) current = result;
 				} catch (error) {
-					this.reportFailure(ext, "before_provider_request", error);
+					this.reportFailure(ext.path, "before_provider_request", error);
 				}
 			}
 		}
@@ -327,7 +327,7 @@ export class Runner {
 				try {
 					await handler({ type: "before_provider_headers", headers }, ctx);
 				} catch (error) {
-					this.reportFailure(ext, "before_provider_headers", error);
+					this.reportFailure(ext.path, "before_provider_headers", error);
 				}
 			}
 		}
@@ -357,7 +357,7 @@ export class Runner {
 					if (result?.message) messages.push(result.message);
 					if (result?.systemPrompt !== undefined) options.forceSystemPrompt = result.systemPrompt;
 				} catch (error) {
-					this.reportFailure(ext, "before_agent_start", error);
+					this.reportFailure(ext.path, "before_agent_start", error);
 				}
 			}
 		}
@@ -375,7 +375,7 @@ export class Runner {
 						for (const path of result?.[key] ?? []) found[key].push({ path, extensionPath: ext.path });
 					}
 				} catch (error) {
-					this.reportFailure(ext, "resources_discover", error);
+					this.reportFailure(ext.path, "resources_discover", error);
 				}
 			}
 		}
@@ -397,7 +397,7 @@ export class Runner {
 						currentImages = result.images ?? currentImages;
 					}
 				} catch (error) {
-					this.reportFailure(ext, "input", error);
+					this.reportFailure(ext.path, "input", error);
 				}
 			}
 		}
@@ -421,7 +421,7 @@ export class Runner {
 					if (result?.entries !== undefined) entries = result.entries;
 					if (result?.continue !== undefined) shouldContinue = result.continue;
 				} catch (error) {
-					this.reportFailure(ext, baseEvent.type, error);
+					this.reportFailure(ext.path, baseEvent.type, error);
 				}
 				try {
 					context = await buildContext(entries);
