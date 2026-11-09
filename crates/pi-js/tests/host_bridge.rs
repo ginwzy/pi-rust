@@ -204,6 +204,34 @@ async fn uncaught_errors_exit_idle_and_interrupt() {
 }
 
 #[tokio::test]
+async fn dropping_the_runtime_interrupts_javascript_stuck_in_a_synchronous_call() {
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    write(
+        &root,
+        "spin.cjs",
+        "module.exports = function () { require('node:fs').writeFileSync(__dirname + '/stage', 'entered'); for (;;) {} };",
+    );
+    let spin = runtime.import_default(root.join("spin.cjs").display().to_string()).await.unwrap();
+    let call = tokio::spawn(async move { spin.call(vec![]).await });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !root.join("stage").exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the spinning call never started");
+    let (dropped, done) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(runtime);
+        let _ = dropped.send(());
+    });
+    done.recv_timeout(Duration::from_secs(5)).expect("dropping the runtime must interrupt the spinning call");
+    let result = tokio::time::timeout(Duration::from_secs(5), call).await.unwrap().unwrap();
+    assert!(result.is_err(), "{result:?}");
+}
+
+#[tokio::test]
 async fn async_host_calls_start_in_the_order_javascript_made_them() {
     let (_dir, root) = tempdir();
     let (runtime, _capture) = runtime(&root);

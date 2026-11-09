@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock, mpsc};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use rquickjs::{Ctx, Function, Value};
 
@@ -31,6 +32,8 @@ use crate::virtual_modules::VirtualModules;
 /// Native stack of the JavaScript thread, and the part QuickJS may use before a `RangeError`.
 const THREAD_STACK_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_JS_STACK_BYTES: usize = 8 * 1024 * 1024;
+/// How long work queued before a drop may finish before the drop interrupts it.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputStream {
@@ -164,10 +167,13 @@ pub(crate) struct RuntimeConfig {
     pub on_exit: Option<ExitCallback>,
 }
 
-/// Owns the JavaScript thread. Dropping it stops the event loop and joins the thread.
+/// Owns the JavaScript thread. Dropping it stops the event loop and joins the thread, interrupting
+/// JavaScript that does not stop within `SHUTDOWN_GRACE`.
 pub struct JsRuntime {
     handle: JsHandle,
     thread: Option<JoinHandle<()>>,
+    /// Disconnects when the QuickJS thread ends, so dropping can bound its wait.
+    exited: Option<mpsc::Receiver<()>>,
     owned_tokio: Option<tokio::runtime::Runtime>,
 }
 
@@ -210,19 +216,22 @@ impl JsRuntime {
         });
         if let JsBackend::Node { executable } = &options.backend {
             let (handle, thread) = crate::node_backend::start(&options, executable, shared)?;
-            return Ok(Self { handle, thread: Some(thread), owned_tokio });
+            return Ok(Self { handle, thread: Some(thread), exited: None, owned_tokio });
         }
         let (sender, receiver) = mpsc::channel();
         let (ready_sender, ready) = mpsc::channel();
         let setup = LoopSetup { memory_limit: options.memory_limit, max_stack_size: options.max_stack_size };
         let thread_shared = shared.clone();
         let thread_sender = sender.clone();
-        let thread = std::thread::Builder::new()
-            .name(options.name.clone())
-            .stack_size(THREAD_STACK_BYTES)
-            .spawn(move || thread_main(thread_shared, thread_sender, receiver, setup, ready_sender))?;
+        let (exit, exited) = mpsc::channel::<()>();
+        let thread =
+            std::thread::Builder::new().name(options.name.clone()).stack_size(THREAD_STACK_BYTES).spawn(move || {
+                let _exit = exit;
+                thread_main(thread_shared, thread_sender, receiver, setup, ready_sender);
+            })?;
         let started = ready.recv().unwrap_or_else(|_| Err(JsError::new("the JavaScript thread exited during startup")));
-        let runtime = Self { handle: JsHandle::new(sender, shared), thread: Some(thread), owned_tokio };
+        let runtime =
+            Self { handle: JsHandle::new(sender, shared), thread: Some(thread), exited: Some(exited), owned_tokio };
         started.map(|()| runtime)
     }
 
@@ -245,6 +254,15 @@ impl Drop for JsRuntime {
         if let Some(thread) = self.thread.take()
             && !self.handle.on_js_thread()
         {
+            if let Some(exited) = &self.exited {
+                // Synchronous JavaScript never reaches the queued shutdown. Interrupt it after the
+                // grace period, again on every wait because each loop turn clears the flag.
+                let mut wait = SHUTDOWN_GRACE;
+                while matches!(exited.recv_timeout(wait), Err(mpsc::RecvTimeoutError::Timeout)) {
+                    self.handle.interrupt();
+                    wait = Duration::from_millis(10);
+                }
+            }
             let _ = thread.join();
         }
         if let Some(runtime) = self.owned_tokio.take() {
