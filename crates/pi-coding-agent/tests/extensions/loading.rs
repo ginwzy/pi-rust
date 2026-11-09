@@ -68,6 +68,50 @@ async fn async_factories_finish_before_the_session_and_handlers_unsubscribe() {
     assert_eq!(h.errors(), Vec::<String>::new());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_loading_interrupts_a_synchronous_factory() {
+    use std::time::Duration;
+
+    let h = harness(Setup {
+        files: vec![("ready.ts", "export default function () {}".into())],
+        load: vec!["ready.ts"],
+        runtime: Some(ExtensionRuntime::QuickJs),
+        ..Setup::default()
+    })
+    .await;
+    let entered = h.cwd.join("load-entered");
+    let file = h.extension_dir.join("spin.ts");
+    std::fs::write(&file, format!(
+        "import {{ writeFileSync }} from 'node:fs'; export default function () {{ writeFileSync({}, 'entered'); for (;;) {{}} }}",
+        serde_json::to_string(&entered).unwrap()
+    )).unwrap();
+    let services = h.services.clone();
+    let task = tokio::spawn(async move {
+        load_extensions(
+            &services,
+            &LoadOptions {
+                entries: Some(vec![LoadEntry::file(file)]),
+                runtime: Some(ExtensionRuntime::QuickJs),
+                ..LoadOptions::default()
+            },
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !entered.exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    let result = tokio::time::timeout(Duration::from_secs(3), task)
+        .await
+        .expect("cancelled loading must finish dropping its runtime");
+    assert!(matches!(result, Err(error) if error.is_cancelled()));
+    h.runner.shutdown();
+}
+
 #[test]
 fn directories_resolve_through_manifests_and_index_files() {
     let root = tempfile::tempdir().unwrap();

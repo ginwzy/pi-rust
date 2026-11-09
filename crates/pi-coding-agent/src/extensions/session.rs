@@ -36,6 +36,17 @@ pub struct LoadedExtensions {
     pub diagnostics: Vec<RuntimeDiagnostic>,
 }
 
+struct Loading(Option<Arc<ExtensionRunner>>);
+
+impl Drop for Loading {
+    fn drop(&mut self) {
+        if let Some(runner) = self.0.take() {
+            // Interrupt before the last runtime owner can join a stuck JavaScript thread.
+            runner.shutdown();
+        }
+    }
+}
+
 /// Load the extensions of `services` (`-e`, settings, packages, `.pi/extensions` when trusted)
 /// and register their providers; attach the runner to the session created next.
 pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOptions) -> LoadedExtensions {
@@ -55,6 +66,7 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
             return LoadedExtensions { runner: None, diagnostics };
         }
     };
+    let mut loading = Loading(Some(runner.clone()));
     runner.load_inline(&options.inline).await;
     runner.load_entries(&entries).await;
     for (name, value) in &options.flag_values {
@@ -66,6 +78,7 @@ pub async fn load_extensions(services: &AgentSessionServices, options: &LoadOpti
     diagnostics.extend(runner.load_errors().into_iter().map(|error| {
         RuntimeDiagnostic::error(format!("Failed to load extension \"{}\": {}", error.path, error.error))
     }));
+    loading.0 = None;
     LoadedExtensions { runner: Some(runner), diagnostics }
 }
 
