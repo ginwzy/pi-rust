@@ -8,11 +8,62 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use node_common::*;
-use pi_js::JsRuntime;
+use pi_js::{HostFunction, JsRuntime};
 use serde_json::json;
 
 async fn within<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(15), future).await.expect("the call returned in time")
+}
+
+#[tokio::test]
+async fn frames_preserve_partitioned_unicode_and_message_order() {
+    let (_dir, root) = tempdir();
+    let Some((runtime, _capture)) = node_runtime(&root) else { return };
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let reader = manifest.join("src/node_backend/js/frames.cjs");
+    let fixture = manifest.join("tests/fixtures/node_backend/framing.cjs");
+    let source = format!(
+        "require('node:fs').writeFileSync('stage', 'framing'); return require({})(require({}));",
+        json!(fixture),
+        json!(reader)
+    );
+    let result = run_cjs_within(&runtime, &root, &source, 15).await;
+    assert_eq!(result, json!({ "partitions": 6, "frames": 2, "characters": 2359296 }));
+}
+
+#[tokio::test]
+async fn large_host_replies_preserve_sync_async_and_following_calls() {
+    let (_dir, root) = tempdir();
+    let Some((runtime, _capture)) = node_runtime(&root) else { return };
+    let pattern = "历史🙂e\u{301}\\\"\n";
+    let count = 262_144;
+    let payload = json!({ "text": pattern.repeat(count), "values": [false, 0, null] });
+    let sync = payload.clone();
+    runtime.register_host_function("large", HostFunction::sync(move |_| Ok(sync.clone().into())));
+    runtime.register_host_function(
+        "largeAsync",
+        HostFunction::asynchronous(move |_| {
+            let value = payload.clone();
+            async move { Ok(value.into()) }
+        }),
+    );
+    let source = format!(
+        r#"const fs = require('node:fs');
+const host = (await import('pi:host')).default;
+const expected = {}.repeat({count});
+const results = [];
+for (const name of ['large', 'largeAsync', 'large']) {{
+  fs.writeFileSync('stage', name);
+  const reply = await host.call(name);
+  results.push([reply.text === expected, reply.values]);
+}}
+return results;"#,
+        json!(pattern)
+    );
+    let results = run_cjs_within(&runtime, &root, &source, 15).await;
+    assert_eq!(results, json!([[true, [false, 0, null]], [true, [false, 0, null]], [true, [false, 0, null]]]));
+    assert_eq!(within(runtime.eval("1 + 1")).await.unwrap().into_json(), json!(2));
+    drop(runtime);
 }
 
 #[tokio::test]

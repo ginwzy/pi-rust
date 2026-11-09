@@ -4,6 +4,7 @@
 const net = require("node:net");
 const path = require("node:path");
 const { Worker, MessageChannel } = require("node:worker_threads");
+const readFrames = require("./frames.cjs");
 
 const port = Number(process.env.PI_NODE_BACKEND_PORT);
 const token = process.env.PI_NODE_BACKEND_TOKEN;
@@ -94,17 +95,8 @@ function start(config) {
   });
 }
 
-let buffered = "";
 socket.setEncoding("utf8");
-socket.on("data", (chunk) => {
-  buffered += chunk;
-  let newline;
-  while ((newline = buffered.indexOf("\n")) >= 0) {
-    const line = buffered.slice(0, newline);
-    buffered = buffered.slice(newline + 1);
-    if (line.trim()) onRust(JSON.parse(line));
-  }
-});
+socket.on("data", readFrames(onRust));
 socket.on("end", () => process.exit(0));
 socket.on("close", () => process.exit(0));
 socket.on("error", () => process.exit(1));

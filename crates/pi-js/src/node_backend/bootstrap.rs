@@ -18,6 +18,7 @@ use crate::runtime::{JsHandle, JsRuntimeOptions, OutputStream};
 
 const FILES: &[(&str, &str)] = &[
     ("main.cjs", include_str!("js/main.cjs")),
+    ("frames.cjs", include_str!("js/frames.cjs")),
     ("worker.cjs", include_str!("js/worker.cjs")),
     ("wire.cjs", include_str!("js/wire.cjs")),
     ("worker_globals.cjs", include_str!("js/worker_globals.cjs")),
