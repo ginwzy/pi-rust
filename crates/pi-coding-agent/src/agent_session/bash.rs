@@ -278,7 +278,8 @@ pub async fn execute_bash_command(
         }
     }
     feed(&mut collector, &[], true);
-    if let Some(cause) = termination {
+    // A cancelled command was killed by its own stop, not from outside.
+    if let (Some(cause), false) = (termination, cancelled) {
         collector.append(&format!("\n\n{}", cause.message()));
     }
     let full: String = collector.chunks.iter().map(String::as_str).collect();
@@ -454,5 +455,45 @@ mod tests {
         assert!(result.cancelled);
         assert_eq!(result.exit_code, None);
         assert_eq!(result.output, "start\n");
+    }
+
+    /// Reports every SIGKILL as an external kill, as a containing launcher does.
+    struct Killing;
+
+    struct KillWatch;
+
+    impl pi_js::process::Watch for KillWatch {
+        fn ended(self: Box<Self>, _: &std::process::ExitStatus) -> Option<pi_js::process::Termination> {
+            Some(pi_js::process::Termination::Killed)
+        }
+    }
+
+    impl Launcher for Killing {
+        fn launch(&self, program: &std::ffi::OsStr) -> Launch {
+            Launch { command: std::process::Command::new(program), watch: Box::new(KillWatch) }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_command_is_not_reported_as_killed_externally() {
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = CancellationToken::new();
+        let trigger = cancel.clone();
+        let mut on_data = move |chunk: &str| {
+            if chunk.contains("start") {
+                trigger.cancel();
+            }
+        };
+        let result = execute_bash_command("echo start; sleep 30", dir.path(), None, &Killing, &cancel, &mut on_data)
+            .await
+            .unwrap();
+        assert!(result.cancelled);
+        assert_eq!(result.output, "start\n");
+
+        let result =
+            execute_bash_command("echo done", dir.path(), None, &Killing, &CancellationToken::new(), &mut |_: &str| {})
+                .await
+                .unwrap();
+        assert!(result.output.ends_with("Command was killed externally."), "{}", result.output);
     }
 }
