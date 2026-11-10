@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use futures::future::BoxFuture;
 use pi_agent::{ToolContext, ToolUpdateCallback};
 use pi_ai::{ApiProvider, EventSender};
+use pi_js::process::Launcher;
 use pi_js::{HostFunction, HostValue, JsBackend, JsError, JsHandle, JsRef, JsRuntime, JsRuntimeOptions};
 use pi_mcp::McpServerRegistry;
 use serde_json::{Value, json};
@@ -156,6 +157,8 @@ pub struct ExtensionRunner {
     stale: AtomicBool,
     /// Queue of `emit_detached` events, delivered one at a time in order.
     pub(crate) detached: OnceLock<mpsc::UnboundedSender<Value>>,
+    /// Starts the child processes of `shell.exec` and the built-in tools extensions run.
+    launcher: Arc<dyn Launcher>,
     weak: Weak<ExtensionRunner>,
 }
 
@@ -177,8 +180,19 @@ impl ExtensionRunner {
         model_runtime: Arc<ModelRuntime>,
         backend: JsBackend,
     ) -> BoxFuture<'static, anyhow::Result<Arc<Self>>> {
+        Self::start_with(cwd, agent_dir, model_runtime, backend, pi_js::process::direct())
+    }
+
+    /// [`Self::start`], starting the extensions' child processes and `node` through `launcher`.
+    pub fn start_with(
+        cwd: &Path,
+        agent_dir: &Path,
+        model_runtime: Arc<ModelRuntime>,
+        backend: JsBackend,
+        launcher: Arc<dyn Launcher>,
+    ) -> BoxFuture<'static, anyhow::Result<Arc<Self>>> {
         let (cwd, agent_dir) = (cwd.to_path_buf(), agent_dir.to_path_buf());
-        Box::pin(async move { Self::start_at(cwd, agent_dir, model_runtime, backend).await })
+        Box::pin(async move { Self::start_at(cwd, agent_dir, model_runtime, backend, launcher).await })
     }
 
     async fn start_at(
@@ -186,9 +200,11 @@ impl ExtensionRunner {
         agent_dir: PathBuf,
         model_runtime: Arc<ModelRuntime>,
         backend: JsBackend,
+        launcher: Arc<dyn Launcher>,
     ) -> anyhow::Result<Arc<Self>> {
         let mut options = JsRuntimeOptions::new(&cwd);
         options.backend = backend.clone();
+        options.launcher = launcher.clone();
         options.name = "pi-extensions".into();
         options.virtual_modules = modules::virtual_modules();
         options.env = Some(pi_ai::env::process_env());
@@ -228,6 +244,7 @@ impl ExtensionRunner {
                 commands: Mutex::default(),
                 host: OnceLock::new(),
                 backend,
+                launcher,
                 requested_runtime: OnceLock::new(),
                 requested_node: OnceLock::new(),
                 cwd: cwd.clone(),
@@ -275,6 +292,11 @@ impl ExtensionRunner {
     /// The model runtime providers and virtual models register with.
     pub fn model_runtime(&self) -> &Arc<ModelRuntime> {
         &self.model_runtime
+    }
+
+    /// Starts the child processes of this runner's session.
+    pub fn launcher(&self) -> Arc<dyn Launcher> {
+        self.launcher.clone()
     }
 
     pub(crate) fn this(&self) -> Arc<Self> {

@@ -305,8 +305,9 @@ impl AgentTool for ShellTool {
         let mut stream = finish(&stream, &on_update);
         let snap = stream.acc.snapshot(true);
         stream.acc.close_temp_file();
-        let exit_code = match result {
-            Ok(code) => code,
+        let (exit_code, termination) = match result {
+            Ok(code) => (code, None),
+            Err(ShellExecError::Terminated { cause, code }) => (Some(code), Some(cause)),
             Err(error) => {
                 let (text, _) = format_output(&stream.acc, &snap, "");
                 return Err(match error {
@@ -315,10 +316,14 @@ impl AgentTool for ShellTool {
                         anyhow!(append_status(&text, &format!("Command timed out after {secs} seconds")))
                     }
                     ShellExecError::Failed(error) => error,
+                    ShellExecError::Terminated { cause, .. } => anyhow!(append_status(&text, &cause.message())),
                 });
             }
         };
-        let (text, details) = format_output(&stream.acc, &snap, "(no output)");
+        let (text, mut details) = format_output(&stream.acc, &snap, "(no output)");
+        if let Some(cause) = termination {
+            details.get_or_insert_with(|| json!({}))["termination"] = serde_json::to_value(cause)?;
+        }
         let Some(code) = exit_code else {
             return Err(anyhow!(append_status(&text, "Command terminated without an exit code")));
         };
@@ -330,7 +335,9 @@ impl AgentTool for ShellTool {
         }
         structured["exit_code"] = json!(code);
         structured["wall_time_seconds"] = js_number(wall_time);
-        let (text, is_error) = if code == 0 {
+        let (text, is_error) = if let Some(cause) = termination {
+            (append_status(&text, &cause.message()), true)
+        } else if code == 0 {
             (text, false)
         } else {
             (append_status(&text, &format!("Command exited with code {code}")), true)

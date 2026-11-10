@@ -140,8 +140,15 @@ pub(crate) async fn start_runner(
         diagnostics.push(fallback_warning(&reason));
         JsBackend::QuickJs
     });
-    let start =
-        |backend| ExtensionRunner::start(&services.cwd, &services.agent_dir, services.model_runtime.clone(), backend);
+    let start = |backend| {
+        ExtensionRunner::start_with(
+            &services.cwd,
+            &services.agent_dir,
+            services.model_runtime.clone(),
+            backend,
+            services.launcher.clone(),
+        )
+    };
     let started = match start(backend.clone()).await {
         Err(error) if backend != JsBackend::QuickJs => {
             diagnostics.push(fallback_warning(&format!("{error:#}")));

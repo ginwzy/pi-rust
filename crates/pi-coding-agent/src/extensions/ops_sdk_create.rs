@@ -66,6 +66,7 @@ pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Res
         model_runtime: runner.model_runtime().clone(),
         resource_loader: Arc::new(Mutex::new(loader)),
         diagnostics: Vec::new(),
+        launcher: runner.launcher(),
     };
     let mut create = CreateAgentSessionOptions::new(services, manager);
     create.model = options.get("model").cloned().map(serde_json::from_value).transpose().map_err(error)?;

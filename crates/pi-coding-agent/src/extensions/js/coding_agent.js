@@ -166,7 +166,7 @@ function builtinDefinition(name, cwd, options = {}) {
 				timeout: execOptions.timeout,
 				env: execOptions.env,
 			});
-			return { exitCode: result?.exitCode ?? null };
+			return { exitCode: result?.exitCode ?? null, termination: result?.termination };
 		});
 	}
 	if (typeof options.spawnHook === "function") toolOptions.spawnHook = registerCallback(options.spawnHook);

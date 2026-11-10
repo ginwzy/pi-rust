@@ -7,6 +7,7 @@ use std::process::Stdio;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use pi_js::process::{Launch, Launcher};
 use regex::Regex;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -181,12 +182,14 @@ pub async fn execute_bash_command(
     command: &str,
     cwd: &Path,
     shell_path: Option<&Path>,
+    launcher: &dyn Launcher,
     cancel: &CancellationToken,
     on_chunk: &mut (dyn FnMut(&str) + Send),
 ) -> anyhow::Result<BashResult> {
     let config = crate::tools::bash_shell_config(shell_path)?;
     let from_stdin = config.transport == crate::tools::CommandTransport::Stdin;
-    let mut process = tokio::process::Command::new(&config.shell);
+    let Launch { command: launched, mut watch } = launcher.launch(config.shell.as_os_str());
+    let mut process = tokio::process::Command::from(launched);
     for name in SESSION_VARIABLES {
         process.env_remove(name);
     }
@@ -204,6 +207,10 @@ pub async fn execute_bash_command(
     #[cfg(unix)]
     process.process_group(0);
     let mut child = process.spawn().map_err(|error| anyhow::anyhow!("Failed to start shell: {error}"))?;
+    if let Some(pid) = child.id() {
+        watch.spawned(pid);
+    }
+    let mut watch = Some(watch);
     let _tracked = crate::signals::DetachedChildGuard::new(child.id());
     if let Some(mut stdin) = child.stdin.take() {
         let script = command.as_bytes().to_vec();
@@ -241,6 +248,7 @@ pub async fn execute_bash_command(
     let mut status_done = false;
     let mut streams_done = false;
     let mut cancelled = false;
+    let mut termination = None;
     let far = tokio::time::Instant::now() + Duration::from_secs(86_400 * 365);
     let mut idle_deadline = far;
     while !(status_done && streams_done) {
@@ -259,6 +267,9 @@ pub async fn execute_bash_command(
                 None => streams_done = true,
             },
             status = child.wait(), if !status_done => {
+                if let (Ok(status), Some(watch)) = (&status, watch.take()) {
+                    termination = watch.ended(status);
+                }
                 exit_code = status.ok().and_then(|status| status.code());
                 status_done = true;
                 idle_deadline = tokio::time::Instant::now() + POST_EXIT_IDLE;
@@ -267,6 +278,9 @@ pub async fn execute_bash_command(
         }
     }
     feed(&mut collector, &[], true);
+    if let Some(cause) = termination {
+        collector.append(&format!("\n\n{}", cause.message()));
+    }
     let full: String = collector.chunks.iter().map(String::as_str).collect();
     let truncation = truncate_tail(&full, TruncationOptions::default());
     if truncation.truncated {
@@ -311,7 +325,9 @@ impl AgentSession {
             on_chunk(delta);
             self.emit(&AgentSessionEvent::BashExecutionUpdate { id: id.map(String::from), delta: delta.to_string() });
         };
-        let result = execute_bash_command(&resolved, &cwd, shell.as_deref(), &cancel, &mut forward).await;
+        let result =
+            execute_bash_command(&resolved, &cwd, shell.as_deref(), &*self.services().launcher, &cancel, &mut forward)
+                .await;
         lock(&self.state).bash.retain(|(running, _)| *running != key);
         let result = result?;
         self.record_bash_result(command, &result, exclude_from_context);
@@ -358,6 +374,8 @@ impl AgentSession {
 
 #[cfg(test)]
 mod tests {
+    use pi_js::process::Direct;
+
     use super::*;
 
     #[test]
@@ -391,10 +409,16 @@ mod tests {
         let mut chunks = String::new();
         let mut collect = |chunk: &str| chunks.push_str(chunk);
         let cancel = CancellationToken::new();
-        let result =
-            execute_bash_command("printf 'a\\r\\n\\033[1mb\\033[0m'; exit 3", dir.path(), None, &cancel, &mut collect)
-                .await
-                .unwrap();
+        let result = execute_bash_command(
+            "printf 'a\\r\\n\\033[1mb\\033[0m'; exit 3",
+            dir.path(),
+            None,
+            &Direct,
+            &cancel,
+            &mut collect,
+        )
+        .await
+        .unwrap();
         assert_eq!(result.output, "a\nb");
         assert_eq!(result.exit_code, Some(3));
         assert!(!result.cancelled && !result.truncated);
@@ -405,7 +429,8 @@ mod tests {
     async fn truncates_long_output_and_keeps_the_full_text() {
         let dir = tempfile::tempdir().unwrap();
         let cancel = CancellationToken::new();
-        let result = execute_bash_command("seq 1 30000", dir.path(), None, &cancel, &mut |_: &str| {}).await.unwrap();
+        let result =
+            execute_bash_command("seq 1 30000", dir.path(), None, &Direct, &cancel, &mut |_: &str| {}).await.unwrap();
         assert!(result.truncated);
         assert!(result.output.trim_end().ends_with("\n30000"));
         let full = std::fs::read_to_string(result.full_output_path.unwrap()).unwrap();
@@ -423,8 +448,9 @@ mod tests {
                 trigger.cancel();
             }
         };
-        let result =
-            execute_bash_command("echo start; sleep 30", dir.path(), None, &cancel, &mut on_data).await.unwrap();
+        let result = execute_bash_command("echo start; sleep 30", dir.path(), None, &Direct, &cancel, &mut on_data)
+            .await
+            .unwrap();
         assert!(result.cancelled);
         assert_eq!(result.exit_code, None);
         assert_eq!(result.output, "start\n");

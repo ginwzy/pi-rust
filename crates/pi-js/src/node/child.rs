@@ -1,7 +1,8 @@
 //! Natives for `node:child_process`: tokio children whose output and exit are posted back to a
 //! JavaScript callback, and blocking `spawnSync` with input and a deadline.
 
-use std::process::{Command, Stdio};
+use std::ffi::OsStr;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,7 @@ use tokio::process::ChildStdin;
 use super::child_stdio::{Entry, ParentEnd};
 use super::set_fn;
 use crate::error::JsError;
+use crate::process::Launch;
 use crate::runtime::convert::{bytes_to_js, error_value, from_json, latin1_to_bytes, throw, to_json};
 use crate::runtime::scope::spawn_op;
 use crate::runtime::state::{Message, Task, state};
@@ -45,8 +47,8 @@ pub(crate) struct SpawnOptions {
     gid: Option<u32>,
 }
 
-fn build(options: &SpawnOptions) -> Result<(Command, Vec<(usize, ParentEnd)>), JsError> {
-    let mut command = Command::new(&options.file);
+fn build(options: &SpawnOptions) -> Result<(Launch, Vec<(usize, ParentEnd)>), JsError> {
+    let Launch { mut command, watch } = state().shared.config.launcher.launch(OsStr::new(&options.file));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -81,7 +83,7 @@ fn build(options: &SpawnOptions) -> Result<(Command, Vec<(usize, ParentEnd)>), J
     }
     command.current_dir(&options.cwd).env_clear().envs(options.env.iter().map(|(key, value)| (key, value)));
     let pipes = super::child_stdio::apply(&mut command, &options.stdio)?;
-    Ok((command, pipes))
+    Ok((Launch { command, watch }, pipes))
 }
 
 /// Node's spawn failure: `spawn <file> ENOENT` with `path` and `spawnargs`.
@@ -202,7 +204,7 @@ fn spawn<'js>(ctx: Ctx<'js>, options: Value<'js>, callback: Function<'js>) -> rq
     let options: SpawnOptions = parse(&ctx, options)?;
     let result = Object::new(ctx.clone())?;
     let state = state();
-    let (command, pipes) = match build(&options) {
+    let (Launch { command, mut watch }, pipes) = match build(&options) {
         Ok(built) => built,
         Err(error) => {
             result.set("error", error_value(&ctx, &error)?)?;
@@ -223,6 +225,7 @@ fn spawn<'js>(ctx: Ctx<'js>, options: Value<'js>, callback: Function<'js>) -> rq
     };
     let id = state.next_id();
     let pid = child.id().unwrap_or(0);
+    watch.spawned(pid);
     let sender = state.sender.clone();
     let tokio = &state.shared.tokio;
     let mut remaining = 1;
@@ -249,7 +252,10 @@ fn spawn<'js>(ctx: Ctx<'js>, options: Value<'js>, callback: Function<'js>) -> rq
         #[cfg(not(windows))]
         let status = child.wait().await;
         let (code, signal) = match status {
-            Ok(status) => (status.code(), exit_signal(&status)),
+            Ok(status) => {
+                watch.ended(&status);
+                (status.code(), exit_signal(&status))
+            }
             Err(_) => (None, None),
         };
         post(&sender, id, Event::Exit(code, signal));
@@ -370,7 +376,7 @@ fn spawn_sync<'js>(
     let options: SpawnOptions = parse(&ctx, options)?;
     let result = Object::new(ctx.clone())?;
     let input = input.0.flatten().map(|text| latin1_to_bytes(&text));
-    let (mut command, pipes) = match build(&options) {
+    let (Launch { mut command, mut watch }, pipes) = match build(&options) {
         Ok(built) => built,
         Err(error) => {
             result.set("error", error_value(&ctx, &error)?)?;
@@ -390,6 +396,7 @@ fn spawn_sync<'js>(
         }
     };
     let extra = super::child_stdio::drain(pipes);
+    watch.spawned(child.id());
     result.set("pid", child.id())?;
     let writer = child.stdin.take().map(|mut stdin| {
         let input = input.unwrap_or_default();
@@ -441,6 +448,7 @@ fn spawn_sync<'js>(
     result.set("extra", output)?;
     match status {
         Ok(status) => {
+            watch.ended(&status);
             result.set("status", status.code())?;
             result.set("signal", exit_signal(&status))?;
         }

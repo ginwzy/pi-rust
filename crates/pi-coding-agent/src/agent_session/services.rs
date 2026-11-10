@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use pi_ai::auth::{CredentialStore, OAuthLookup};
 use pi_ai::env::EnvLookup;
+use pi_js::process::Launcher;
 
 use super::model_runtime::{ModelRuntime, ModelRuntimeOptions};
 use super::runtime_catalog::CatalogSetup;
@@ -78,6 +79,8 @@ pub struct CreateServicesOptions {
     /// Environment a new model runtime reads credentials from; `None` is the process environment.
     pub credential_env: Option<Arc<dyn EnvLookup>>,
     pub resources: ResourceOptions,
+    /// Starts the session's child processes; `None` starts them directly.
+    pub launcher: Option<Arc<dyn Launcher>>,
 }
 
 impl CreateServicesOptions {
@@ -95,6 +98,8 @@ pub struct AgentSessionServices {
     pub settings: Arc<SettingsManager>,
     pub resource_loader: Arc<Mutex<ResourceLoader>>,
     pub diagnostics: Vec<RuntimeDiagnostic>,
+    /// Starts the shell tools, user shell commands, and the extensions' child processes.
+    pub launcher: Arc<dyn Launcher>,
 }
 
 impl AgentSessionServices {
@@ -251,5 +256,6 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
         settings,
         resource_loader: Arc::new(Mutex::new(loader)),
         diagnostics,
+        launcher: options.launcher.unwrap_or_else(pi_js::process::direct),
     }
 }

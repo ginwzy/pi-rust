@@ -78,7 +78,12 @@ impl ShellOperations for JsShellOperations {
             return Err(ShellExecError::Aborted);
         }
         let result = result.map_err(|failure| ShellExecError::Failed(anyhow::anyhow!(failure.message)))?;
-        Ok(result.into_json()["exitCode"].as_i64().map(|code| code as i32))
+        let result = result.into_json();
+        let code = result["exitCode"].as_i64().map(|code| code as i32);
+        if let Ok(cause) = serde_json::from_value(result["termination"].clone()) {
+            return Err(ShellExecError::Terminated { cause, code: code.unwrap_or(-1) });
+        }
+        Ok(code)
     }
 }
 
@@ -108,7 +113,7 @@ pub(crate) async fn builtin_execute(runner: &Arc<ExtensionRunner>, args: &Args) 
         tools_options.write.recorder = Some(session.file_change_recorder());
         tools_options.edit.recorder = Some(session.file_change_recorder());
     }
-    let mut bash = BashToolOptions { ..tools_options.bash.clone() };
+    let mut bash = BashToolOptions { launcher: Some(runner.launcher()), ..tools_options.bash.clone() };
     if let Some(prefix) = options["commandPrefix"].as_str() {
         bash.command_prefix = Some(prefix.to_string());
     }
@@ -125,6 +130,7 @@ pub(crate) async fn builtin_execute(runner: &Arc<ExtensionRunner>, args: &Args) 
         tools_options.powershell.spawn_hook = bash.spawn_hook.clone();
     }
     tools_options.bash = bash;
+    tools_options.powershell.launcher = Some(runner.launcher());
     let tool = crate::tools::create_tool_with_options(&name, Path::new(&cwd), &tools_options)
         .ok_or_else(|| error(format!("Unknown tool: {name}")))?;
     let cancel = runner.token(options["signal"].as_u64());
@@ -140,8 +146,11 @@ pub(crate) async fn builtin_execute(runner: &Arc<ExtensionRunner>, args: &Args) 
 pub(crate) async fn exec(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsError> {
     let (shell, command, cwd, options) = (args.str(0)?, args.str(1)?, args.str(2)?, args.json(3));
     let operations: Arc<dyn ShellOperations> = match shell.as_str() {
-        "powershell" => Arc::new(crate::tools::LocalPowerShellOperations::default()),
-        _ => Arc::new(LocalShellOperations::bash(options["shellPath"].as_str().map(PathBuf::from))),
+        "powershell" => Arc::new(crate::tools::LocalPowerShellOperations::default().with_launcher(runner.launcher())),
+        _ => Arc::new(
+            LocalShellOperations::bash(options["shellPath"].as_str().map(PathBuf::from))
+                .with_launcher(runner.launcher()),
+        ),
     };
     let on_data = match options["dataKey"].as_u64() {
         Some(key) => data_forwarder(runner, key),
@@ -155,6 +164,7 @@ pub(crate) async fn exec(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<V
     };
     match operations.exec(&command, Path::new(&cwd), exec_options).await {
         Ok(code) => Ok(json!({"exitCode": code})),
+        Err(ShellExecError::Terminated { cause, code }) => Ok(json!({"exitCode": code, "termination": cause})),
         Err(ShellExecError::Aborted) => Err(error("aborted")),
         Err(ShellExecError::TimedOut(seconds)) => Err(error(format!("timeout:{seconds}"))),
         Err(ShellExecError::Failed(failure)) => Err(error(format!("{failure:#}"))),

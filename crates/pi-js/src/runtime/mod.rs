@@ -25,6 +25,7 @@ use self::event_loop::LoopSetup;
 use self::state::{LoopState, Message, Shared, state};
 use crate::error::JsError;
 use crate::host::HostFunctions;
+use crate::process::Launcher;
 use crate::resolve::ModuleResolver;
 use crate::transpile::{TranspileCache, TranspileOptions};
 use crate::virtual_modules::VirtualModules;
@@ -133,6 +134,8 @@ pub struct JsRuntimeOptions {
     pub on_uncaught: Option<UncaughtCallback>,
     /// Called by `process.exit(code)`; by default the whole process exits, as in Node.
     pub on_exit: Option<ExitCallback>,
+    /// Starts `child_process` children and the Node backend's `node`.
+    pub launcher: Arc<dyn Launcher>,
 }
 
 impl JsRuntimeOptions {
@@ -154,6 +157,7 @@ impl JsRuntimeOptions {
             output: Arc::new(StdOutput),
             on_uncaught: None,
             on_exit: None,
+            launcher: crate::process::direct(),
         }
     }
 }
@@ -165,6 +169,7 @@ pub(crate) struct RuntimeConfig {
     pub env: BTreeMap<String, String>,
     pub on_uncaught: Option<UncaughtCallback>,
     pub on_exit: Option<ExitCallback>,
+    pub launcher: Arc<dyn Launcher>,
 }
 
 /// Owns the JavaScript thread. Dropping it stops the event loop and joins the thread, interrupting
@@ -211,6 +216,7 @@ impl JsRuntime {
                 env,
                 on_uncaught: options.on_uncaught.clone(),
                 on_exit: options.on_exit.clone(),
+                launcher: options.launcher.clone(),
             },
             output: options.output.clone(),
         });

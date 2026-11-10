@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use pi_js::process::Launcher;
 
 use super::shell::{SessionEnvironmentFn, ShellSpawnHook, ShellTool, ShellToolConfig};
 use super::shell_process::{
@@ -37,11 +38,18 @@ pub struct PowerShellToolOptions {
     /// Supplies the session variables. Sessions supply their own; standalone tools default to
     /// [`super::set_session_environment`].
     pub session_environment: Option<SessionEnvironmentFn>,
+    pub launcher: Option<Arc<dyn Launcher>>,
 }
 
 impl Default for PowerShellToolOptions {
     fn default() -> Self {
-        Self { operations: None, expose_session_environment: true, spawn_hook: None, session_environment: None }
+        Self {
+            operations: None,
+            expose_session_environment: true,
+            spawn_hook: None,
+            session_environment: None,
+            launcher: None,
+        }
     }
 }
 
@@ -57,6 +65,13 @@ impl Default for LocalPowerShellOperations {
     }
 }
 
+impl LocalPowerShellOperations {
+    pub fn with_launcher(mut self, launcher: Arc<dyn Launcher>) -> Self {
+        self.inner = self.inner.with_launcher(launcher);
+        self
+    }
+}
+
 #[async_trait]
 impl ShellOperations for LocalPowerShellOperations {
     async fn exec(&self, command: &str, cwd: &Path, options: ShellExecOptions) -> Result<Option<i32>, ShellExecError> {
@@ -66,7 +81,13 @@ impl ShellOperations for LocalPowerShellOperations {
 
 impl ShellTool {
     pub fn powershell(cwd: PathBuf, options: PowerShellToolOptions) -> Self {
-        let operations = options.operations.unwrap_or_else(|| Arc::new(LocalPowerShellOperations::default()));
+        let operations = options.operations.unwrap_or_else(|| {
+            let local = LocalPowerShellOperations::default();
+            Arc::new(match options.launcher {
+                Some(launcher) => local.with_launcher(launcher),
+                None => local,
+            })
+        });
         let mut tool = Self::with_config(cwd, POWERSHELL_TOOL_CONFIG, operations);
         tool.expose_session_environment = options.expose_session_environment;
         tool.spawn_hook = options.spawn_hook;

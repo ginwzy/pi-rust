@@ -231,7 +231,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
     let (idle, _) = watch::channel(true);
     let session = Arc::new_cyclic(|weak| {
         let tool_options = options.tool_options;
-        let builtin = builtin_tools(&services.cwd, &settings, tool_options.as_ref(), weak.clone());
+        let builtin = builtin_tools(&services.cwd, &settings, tool_options.as_ref(), &services.launcher, weak.clone());
         let mut tools = ToolState::new(builtin, options.custom_tools, selection, base_prompt);
         tools.tool_options = tool_options;
         let warmer_host = Arc::new(SessionWarmerHost::new(weak.clone()));

@@ -2,7 +2,7 @@
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -13,6 +13,7 @@ use super::bridge::Bridge;
 use super::client::NodeClient;
 use super::transport::{self, Listener, PORT_ENV, TOKEN_ENV};
 use crate::error::JsError;
+use crate::process::{Child, Launch};
 use crate::runtime::state::Shared;
 use crate::runtime::{JsHandle, JsRuntimeOptions, OutputStream};
 
@@ -107,7 +108,7 @@ pub(crate) fn start(
     let (dir, temp) = bootstrap_dir(options.cache_dir.as_deref())?;
     write_bootstrap(&dir)?;
     let listener = Listener::bind()?;
-    let mut command = Command::new(executable);
+    let Launch { mut command, watch } = options.launcher.launch(executable.as_os_str());
     command
         .arg("--disable-warning=ExperimentalWarning")
         .arg(dir.join("main.cjs"))
@@ -119,8 +120,9 @@ pub(crate) fn start(
         command.env_clear().envs(env);
     }
     command.env(PORT_ENV, listener.port()?.to_string()).env(TOKEN_ENV, listener.token());
-    let mut child = command.spawn().map_err(|error| io_error(error, &format!("run {}", executable.display())))?;
-    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+    let process = command.spawn().map_err(|error| io_error(error, &format!("run {}", executable.display())))?;
+    let mut child = Child::new(process, watch);
+    let (Some(stdout), Some(stderr)) = (child.process.stdout.take(), child.process.stderr.take()) else {
         return Err(JsError::new("node started without piped stdio").with_code("ERR_PI_NODE_START"));
     };
     transport::forward(format!("{}-stdout", options.name), shared.output.clone(), OutputStream::Stdout, stdout)?;

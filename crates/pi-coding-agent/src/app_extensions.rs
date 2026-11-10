@@ -119,6 +119,7 @@ pub(super) async fn trust_decision(
         oauth: options.oauth.clone(),
         credential_env: options.credential_env.clone(),
         resources: options.resources.clone(),
+        launcher: None,
     })
     .await;
     let inline: Vec<_> = options.inline_extensions.iter().filter(|extension| !extension.builtin()).cloned().collect();

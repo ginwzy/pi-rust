@@ -9,6 +9,7 @@ use std::sync::{Arc, Weak};
 use pi_agent::{
     ActivationFilter, RefreshOptions, SharedTool, ToolAnnotations, ToolExposure, ToolNamespace, ToolRegistry,
 };
+use pi_js::process::Launcher;
 use pi_mcp::naming::is_mcp_tool_name;
 use serde_json::Value;
 
@@ -297,6 +298,7 @@ pub(crate) fn builtin_tools(
     cwd: &Path,
     settings: &SettingsManager,
     custom: Option<&ToolsOptions>,
+    launcher: &Arc<dyn Launcher>,
     session: Weak<AgentSession>,
 ) -> Vec<SharedTool> {
     let mut options = custom.cloned().unwrap_or_else(|| ToolsOptions::from_settings(settings));
@@ -308,6 +310,8 @@ pub(crate) fn builtin_tools(
     if options.edit.operations.is_none() {
         options.edit.recorder.get_or_insert(recorder);
     }
+    options.bash.launcher.get_or_insert_with(|| launcher.clone());
+    options.powershell.launcher.get_or_insert_with(|| launcher.clone());
     let environment = session_environment_fn(session);
     options.bash.session_environment.get_or_insert_with(|| environment.clone());
     options.powershell.session_environment.get_or_insert(environment);
@@ -339,7 +343,7 @@ impl AgentSession {
     /// The built-in tools with this session's tool options.
     pub(crate) fn builtin_tools(&self) -> Vec<SharedTool> {
         let custom = super::lock(&self.tools).tool_options.clone();
-        builtin_tools(self.cwd(), self.settings(), custom.as_ref(), self.weak.clone())
+        builtin_tools(self.cwd(), self.settings(), custom.as_ref(), &self.services().launcher, self.weak.clone())
     }
 }
 

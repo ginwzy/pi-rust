@@ -236,6 +236,7 @@ async fn create_runtime_parts(
         oauth: options.oauth.clone(),
         credential_env: options.credential_env.clone(),
         resources,
+        launcher: None,
     })
     .await;
     let mut diagnostics: Vec<RuntimeDiagnostic> = trust_diagnostics;
@@ -304,6 +305,7 @@ pub async fn extension_help_flags(options: &AppOptions, cwd: &Path) -> Vec<crate
         oauth: options.oauth.clone(),
         credential_env: options.credential_env.clone(),
         resources: options.resources.clone(),
+        launcher: None,
     })
     .await;
     let Some(runner) = extensions::load(options, &services).await.runner else { return Vec::new() };

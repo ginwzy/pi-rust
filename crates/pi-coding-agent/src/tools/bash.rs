@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use pi_js::process::Launcher;
+
 use super::shell::{SessionEnvironmentFn, ShellSpawnHook, ShellTool, ShellToolConfig};
 use super::shell_process::{LocalShellOperations, ShellOperations};
 
@@ -34,6 +36,8 @@ pub struct BashToolOptions {
     /// Supplies the session variables. Sessions supply their own; standalone tools default to
     /// [`super::set_session_environment`].
     pub session_environment: Option<SessionEnvironmentFn>,
+    /// Starts the shells of the default local operations; `None` starts them directly.
+    pub launcher: Option<Arc<dyn Launcher>>,
 }
 
 impl Default for BashToolOptions {
@@ -45,6 +49,7 @@ impl Default for BashToolOptions {
             expose_session_environment: true,
             spawn_hook: None,
             session_environment: None,
+            launcher: None,
         }
     }
 }
@@ -56,8 +61,13 @@ impl ShellTool {
     }
 
     pub fn bash(cwd: PathBuf, options: BashToolOptions) -> Self {
-        let operations =
-            options.operations.unwrap_or_else(|| Arc::new(LocalShellOperations::bash(options.shell_path.clone())));
+        let operations = options.operations.unwrap_or_else(|| {
+            let local = LocalShellOperations::bash(options.shell_path.clone());
+            Arc::new(match options.launcher {
+                Some(launcher) => local.with_launcher(launcher),
+                None => local,
+            })
+        });
         let mut tool = Self::with_config(cwd, BASH_TOOL_CONFIG, operations);
         tool.command_prefix = options.command_prefix.filter(|prefix| !prefix.is_empty());
         tool.expose_session_environment = options.expose_session_environment;

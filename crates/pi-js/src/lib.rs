@@ -7,6 +7,7 @@ pub mod host;
 mod modules;
 mod node;
 pub mod node_backend;
+pub mod process;
 pub mod resolve;
 pub mod runner;
 pub mod runtime;

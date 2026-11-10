@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_trait::async_trait;
+use pi_js::process::{Launch, Launcher, Termination};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -56,6 +57,10 @@ pub struct ShellExecOptions {
 /// Why a command did not run to completion.
 #[derive(Debug)]
 pub enum ShellExecError {
+    Terminated {
+        cause: Termination,
+        code: i32,
+    },
     Aborted,
     /// Timed out after the given seconds.
     TimedOut(f64),
@@ -84,6 +89,7 @@ type ShellResolver = Arc<dyn Fn() -> anyhow::Result<ShellConfig> + Send + Sync>;
 pub struct LocalShellOperations {
     shell_name: String,
     resolve: ShellResolver,
+    launcher: Arc<dyn Launcher>,
 }
 
 impl LocalShellOperations {
@@ -92,7 +98,13 @@ impl LocalShellOperations {
         shell_name: impl Into<String>,
         resolve: impl Fn() -> anyhow::Result<ShellConfig> + Send + Sync + 'static,
     ) -> Self {
-        Self { shell_name: shell_name.into(), resolve: Arc::new(resolve) }
+        Self { shell_name: shell_name.into(), resolve: Arc::new(resolve), launcher: pi_js::process::direct() }
+    }
+
+    /// Start the shells through `launcher`.
+    pub fn with_launcher(mut self, launcher: Arc<dyn Launcher>) -> Self {
+        self.launcher = launcher;
+        self
     }
 
     /// Bash, or the `shellPath` setting when given (upstream `createLocalBashOperations`).
@@ -221,7 +233,9 @@ impl ShellOperations for LocalShellOperations {
         }
 
         let from_stdin = config.transport == CommandTransport::Stdin;
-        let mut process = tokio::process::Command::new(&config.shell);
+        let Launch { command: launched, watch } = self.launcher.launch(config.shell.as_os_str());
+        let mut watch = Some(watch);
+        let mut process = tokio::process::Command::from(launched);
         process.args(&config.args);
         if !from_stdin {
             process.arg(command);
@@ -241,6 +255,9 @@ impl ShellOperations for LocalShellOperations {
         #[cfg(windows)]
         process.creation_flags(CREATE_NO_WINDOW);
         let mut child = process.spawn().map_err(|e| anyhow!("Failed to start {}: {e}", self.shell_name))?;
+        if let (Some(pid), Some(watch)) = (child.id(), watch.as_mut()) {
+            watch.spawned(pid);
+        }
         let _tracked = crate::signals::DetachedChildGuard::new(child.id());
         if let Some(mut stdin) = child.stdin.take() {
             let script = command.as_bytes().to_vec();
@@ -261,6 +278,7 @@ impl ShellOperations for LocalShellOperations {
         let deadline = timeout.map(|t| Instant::now() + t);
         let far_future = Instant::now() + Duration::from_secs(86_400 * 365);
         let (mut status, mut streams_done, mut idle_deadline) = (None, false, far_future);
+        let mut termination = None;
         let outcome = loop {
             if let (Some(code), true) = (status, streams_done) {
                 break Outcome::Exited(code);
@@ -278,7 +296,11 @@ impl ShellOperations for LocalShellOperations {
                     None => streams_done = true,
                 },
                 result = child.wait(), if status.is_none() => {
-                    status = Some(exit_code(result.map_err(anyhow::Error::from)?));
+                    let exit = result.map_err(anyhow::Error::from)?;
+                    if let Some(watch) = watch.take() {
+                        termination = watch.ended(&exit);
+                    }
+                    status = Some(exit_code(exit));
                     idle_deadline = Instant::now() + POST_EXIT_IDLE;
                 }
                 _ = tokio::time::sleep_until(idle_deadline), if status.is_some() => streams_done = true,
@@ -286,10 +308,17 @@ impl ShellOperations for LocalShellOperations {
         };
 
         if let Outcome::Exited(code) = outcome {
+            if let Some(cause) = termination {
+                return Err(ShellExecError::Terminated { cause, code });
+            }
             return Ok(Some(code));
         }
         kill_tree(&mut child).await;
-        let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+        if let Ok(Ok(exit)) = tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+            if let Some(watch) = watch.take() {
+                watch.ended(&exit);
+            }
+        }
         while let Ok(Some(data)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
             (options.on_data)(&data);
         }

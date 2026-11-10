@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::net::{Shutdown, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock, mpsc};
 use std::thread::ThreadId;
@@ -14,6 +13,7 @@ use serde_json::{Map, Value, json};
 
 use crate::error::JsError;
 use crate::host::HostValue;
+use crate::process::Child;
 use crate::resolve::normalize;
 
 pub(crate) type Answer = Result<HostValue, JsError>;

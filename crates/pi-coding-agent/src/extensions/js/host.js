@@ -406,7 +406,7 @@ async function runOperations(operations, command, cwd, options) {
 		timeout: options.timeout,
 		env: options.env,
 	});
-	return { exitCode: result?.exitCode ?? null };
+	return { exitCode: result?.exitCode ?? null, termination: result?.termination };
 }
 
 function loginCallbacks(keys) {
