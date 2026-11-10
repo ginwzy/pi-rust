@@ -44,6 +44,9 @@ pub trait Watch: Send {
 pub enum Termination {
     /// The processes of the group exceeded their memory limit of `limit` bytes.
     MemoryLimit { limit: u64 },
+    /// A process the command started was killed for exceeding the memory limit of `limit`
+    /// bytes, while the command itself exited with its own status.
+    ProcessKilled { limit: u64 },
     /// The system stopped it to relieve memory pressure.
     MemoryPressure,
     /// Killed without evidence that a memory limit or pressure caused it.
@@ -51,11 +54,20 @@ pub enum Termination {
 }
 
 impl Termination {
+    /// Whether the command itself was stopped. Otherwise its exit status stands.
+    pub fn stopped(self) -> bool {
+        !matches!(self, Self::ProcessKilled { .. })
+    }
+
     pub fn message(self) -> String {
+        let gib = |limit: u64| limit as f64 / (1024.0 * 1024.0 * 1024.0);
         match self {
-            Self::MemoryLimit { limit } => format!(
-                "Command was killed: tool processes exceeded their memory limit ({:.1} GiB).",
-                limit as f64 / (1024.0 * 1024.0 * 1024.0)
+            Self::MemoryLimit { limit } => {
+                format!("Command was killed: tool processes exceeded their memory limit ({:.1} GiB).", gib(limit))
+            }
+            Self::ProcessKilled { limit } => format!(
+                "A process started by the command was killed: tool processes exceeded their memory limit ({:.1} GiB).",
+                gib(limit)
             ),
             Self::MemoryPressure => "Command was killed to relieve system memory pressure.".into(),
             Self::Killed => "Command was killed externally.".into(),

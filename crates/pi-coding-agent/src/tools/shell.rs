@@ -335,12 +335,17 @@ impl AgentTool for ShellTool {
         }
         structured["exit_code"] = json!(code);
         structured["wall_time_seconds"] = js_number(wall_time);
-        let (text, is_error) = if let Some(cause) = termination {
-            (append_status(&text, &cause.message()), true)
-        } else if code == 0 {
-            (text, false)
-        } else {
-            (append_status(&text, &format!("Command exited with code {code}")), true)
+        let (text, is_error) = match termination {
+            Some(cause) if cause.stopped() => (append_status(&text, &cause.message()), true),
+            // The command ran to its own exit: its status stands, and the cause follows it.
+            termination => {
+                let (text, is_error) = if code == 0 {
+                    (text, false)
+                } else {
+                    (append_status(&text, &format!("Command exited with code {code}")), true)
+                };
+                (termination.map_or(text.clone(), |cause| append_status(&text, &cause.message())), is_error)
+            }
         };
         Ok(AgentToolResult {
             content: vec![ContentBlock::text(text)],

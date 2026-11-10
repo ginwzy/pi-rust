@@ -110,6 +110,29 @@ async fn signal_terminations_exit_with_128_plus_the_signal() {
 }
 
 #[tokio::test]
+async fn a_killed_process_keeps_the_command_status_and_explains_the_kill() {
+    use pi_js::process::Termination;
+    let limit = 2 * 1024 * 1024 * 1024;
+    let dir = tempfile::tempdir().unwrap();
+    for (cause, code, error, expected) in [
+        (Termination::ProcessKilled { limit }, 0, false, "out\n\n\n"),
+        (Termination::ProcessKilled { limit }, 101, true, "out\n\n\nCommand exited with code 101\n\n"),
+        (Termination::MemoryLimit { limit }, 137, true, "out\n\n\n"),
+    ] {
+        let operations = FakeOperations::new(move |options| {
+            (options.on_data)(b"out\n");
+            Err(ShellExecError::Terminated { cause, code })
+        });
+        let tool = create_bash_tool(dir.path(), BashToolOptions { operations: Some(operations), ..Default::default() });
+        let result = bash(tool.as_ref(), "build").await.unwrap();
+        assert_eq!(result.is_error, error, "{cause:?}");
+        assert_eq!(text(&result), format!("{expected}{}", cause.message()));
+        assert_eq!(result.details.unwrap()["termination"], serde_json::to_value(cause).unwrap());
+        assert_eq!(result.structured_content.unwrap()["exit_code"], code);
+    }
+}
+
+#[tokio::test]
 async fn rejects_a_missing_exit_code_from_custom_operations() {
     let operations = FakeOperations::new(|options| {
         (options.on_data)(b"partial\n");
