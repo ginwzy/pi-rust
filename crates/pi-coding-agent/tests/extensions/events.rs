@@ -137,6 +137,35 @@ async fn message_end_replaces_messages_of_the_same_role() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn message_end_keeps_in_place_edits() {
+    let body = r#"
+	pi.on("message_end", (event) => {
+		if (event.message.role !== "assistant") return;
+		for (const part of event.message.content) {
+			if (part.type === "text") part.text = part.text.replace(/^§\d+§\s*/, "");
+		}
+	});
+	pi.on("message_end", (event) => {
+		if (event.message.role === "assistant") pi.appendEntry("seen", { text: event.message.content[0].text });
+	});
+"#;
+    let h = harness(Setup {
+        files: vec![("strip.ts", with_probe(body))],
+        load: vec!["strip.ts"],
+        responses: vec![FauxResponse::text("§2§ checked")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("go", Vec::new()).await.unwrap();
+    assert_eq!(h.transcript(), vec!["system: ", "user: go", "assistant: checked"]);
+    let entries = h.entries();
+    let seen = entries.iter().find(|entry| entry["customType"] == "seen").expect("second handler ran");
+    assert_eq!(seen["data"]["text"], "checked");
+    let saved = entries.iter().find(|entry| entry["message"]["role"] == "assistant").expect("assistant entry");
+    assert_eq!(text_of(&saved["message"]), "checked");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn compaction_can_be_cancelled_by_extensions() {
     let body = r#"
 	pi.on("session_before_compact", (event) => ({ cancel: event.customInstructions === "keep" }));

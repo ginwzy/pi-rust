@@ -172,6 +172,8 @@ export class Runner {
 		const ctx = this.createContext();
 		let current = event.message;
 		let modified = false;
+		// Upstream handlers receive the stored message object, so in-place edits persist there.
+		const original = JSON.stringify(current);
 		for (const { ext, handlers } of snapshot(this.extensions, "message_end")) {
 			for (const handler of handlers) {
 				try {
@@ -192,7 +194,7 @@ export class Runner {
 				}
 			}
 		}
-		if (!modified) return undefined;
+		if (!modified && JSON.stringify(current) === original) return undefined;
 		const role = current.role;
 		const needsContent = role === "user" || role === "assistant" || role === "toolResult" || role === "custom";
 		return needsContent && current.content == null ? { ...current, content: [] } : current;
