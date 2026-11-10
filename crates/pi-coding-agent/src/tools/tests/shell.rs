@@ -118,6 +118,7 @@ async fn a_killed_process_keeps_the_command_status_and_explains_the_kill() {
         (Termination::ProcessKilled { limit }, 0, false, "out\n\n\n"),
         (Termination::ProcessKilled { limit }, 101, true, "out\n\n\nCommand exited with code 101\n\n"),
         (Termination::MemoryLimit { limit }, 137, true, "out\n\n\n"),
+        (Termination::Killed, 137, true, "out\n\n\nCommand exited with code 137\n\n"),
     ] {
         let operations = FakeOperations::new(move |options| {
             (options.on_data)(b"out\n");

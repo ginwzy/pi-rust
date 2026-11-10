@@ -494,6 +494,6 @@ mod tests {
             execute_bash_command("echo done", dir.path(), None, &Killing, &CancellationToken::new(), &mut |_: &str| {})
                 .await
                 .unwrap();
-        assert!(result.output.ends_with("Command was killed externally."), "{}", result.output);
+        assert!(result.output.ends_with(&pi_js::process::Termination::Killed.message()), "{}", result.output);
     }
 }

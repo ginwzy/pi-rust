@@ -49,14 +49,15 @@ pub enum Termination {
     ProcessKilled { limit: u64 },
     /// The system stopped it to relieve memory pressure.
     MemoryPressure,
-    /// Killed without evidence that a memory limit or pressure caused it.
+    /// Ended by SIGKILL, or with the status 137 a wrapping shell reports for it, without
+    /// evidence that a memory limit or pressure caused it.
     Killed,
 }
 
 impl Termination {
-    /// Whether the command itself was stopped. Otherwise its exit status stands.
+    /// Whether the cause is known to have stopped the command. Otherwise its exit status stands.
     pub fn stopped(self) -> bool {
-        !matches!(self, Self::ProcessKilled { .. })
+        matches!(self, Self::MemoryLimit { .. } | Self::MemoryPressure)
     }
 
     pub fn message(self) -> String {
@@ -70,7 +71,11 @@ impl Termination {
                 gib(limit)
             ),
             Self::MemoryPressure => "Command was killed to relieve system memory pressure.".into(),
-            Self::Killed => "Command was killed externally.".into(),
+            // A command can also exit with 137 itself, so this does not claim who stopped it.
+            Self::Killed => {
+                "Exit status 137 usually means the process was killed by SIGKILL; the tool memory limit did not cause it."
+                    .into()
+            }
         }
     }
 }
