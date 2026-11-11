@@ -176,6 +176,7 @@ mod tests {
         assert_eq!(serialize_conversation(&[tool_result(&short)]), format!("[Tool result]: {short}"));
         let long = "y".repeat(5000);
         let user = Message::User(pi_ai::UserMessage {
+            input_id: None,
             content: UserContent::Blocks(vec![ContentBlock::text(long.clone())]),
             timestamp: 0,
         });

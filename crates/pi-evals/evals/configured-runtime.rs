@@ -65,7 +65,7 @@ async fn complete(runtime: &ModelRuntime, model: &Model, scenario: &ProviderScen
         options.headers = resolved.auth.headers;
         options.env.extend(resolved.env.unwrap_or_default());
     }
-    let user = UserMessage { content: UserContent::Text(scenario.prompt.clone()), timestamp: 0 };
+    let user = UserMessage { input_id: None, content: UserContent::Text(scenario.prompt.clone()), timestamp: 0 };
     let context = Context { messages: vec![Message::User(user)], ..Context::default() };
     let response = pi_ai::complete(&model, &context, options).await;
     Ok(json!({

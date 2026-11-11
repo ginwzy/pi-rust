@@ -209,7 +209,11 @@ impl EmbeddedSession {
         if text.trim().is_empty() {
             anyhow::bail!("Message is empty");
         }
-        Ok(Message::User(pi_ai::UserMessage { content: UserContent::Text(text.into()), timestamp: now_ms() }))
+        Ok(Message::User(pi_ai::UserMessage {
+            input_id: None,
+            content: UserContent::Text(text.into()),
+            timestamp: now_ms(),
+        }))
     }
 
     /// Save user input and run until idle or interrupted. Concurrent submissions fail.

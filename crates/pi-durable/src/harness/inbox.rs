@@ -262,7 +262,7 @@ pub async fn append_input(
     now: f64,
 ) -> DurableResult<EntryId> {
     let Some(entry) = entry else { return append_user(tx, conversation_id, content, now).await };
-    let message = Message::User(UserMessage { content, timestamp: now as i64 });
+    let message = Message::User(UserMessage { input_id: None, content, timestamp: now as i64 });
     let draft = EntryDraft {
         kind: entry.kind.clone(),
         data: entry.data.clone(),
@@ -279,7 +279,7 @@ pub async fn append_user(
     content: UserInput,
     now: f64,
 ) -> DurableResult<EntryId> {
-    let message = Message::User(UserMessage { content, timestamp: now as i64 });
+    let message = Message::User(UserMessage { input_id: None, content, timestamp: now as i64 });
     let draft = TypedEntryDraft { model: Some(vec![message]), ..TypedEntryDraft::new(()) };
     Ok(tx.append_typed_entry(&USER_ENTRY, conversation_id, draft).await?.record.id)
 }

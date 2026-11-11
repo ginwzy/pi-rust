@@ -14,7 +14,7 @@ use support::chat::answer;
 use super::*;
 
 fn user(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 fn assistant(text: &str, calls: &[&str], stop: Option<StopReason>) -> Message {

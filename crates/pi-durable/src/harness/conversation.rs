@@ -101,7 +101,7 @@ impl Conversation {
     pub async fn reset(&self, handoff: Option<String>, context: &Context) -> DurableResult<()> {
         let model = handoff.map(|text| {
             let timestamp = self.harness.0.core.now() as i64;
-            vec![Message::User(UserMessage { content: UserContent::Text(text), timestamp })]
+            vec![Message::User(UserMessage { input_id: None, content: UserContent::Text(text), timestamp })]
         });
         let entry = EntryDraft { model, head: Some(DraftHead::SelfEntry), ..EntryDraft::new(RESET_ENTRY.kind()) };
         self.submit(SubmissionDraft::write(entry), context).await?;

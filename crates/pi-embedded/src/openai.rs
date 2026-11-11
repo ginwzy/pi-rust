@@ -296,7 +296,7 @@ impl Compactor for ModelCompactor {
             timestamp: now_ms(),
         };
         let transcript = serde_json::to_string(&messages)?;
-        let user = UserMessage { content: UserContent::Text(transcript), timestamp: now_ms() };
+        let user = UserMessage { input_id: None, content: UserContent::Text(transcript), timestamp: now_ms() };
         let context = Context {
             system_prompt: None,
             messages: vec![Message::System(system), Message::User(user)],

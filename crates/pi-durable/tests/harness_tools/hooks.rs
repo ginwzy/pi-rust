@@ -65,7 +65,11 @@ async fn replaces_request_messages_observes_responses_and_continues_on_yield() {
     };
     let inject = GenerationHooks {
         before_request: Some(Arc::new(|mut messages: Vec<Message>, _, _| {
-            messages.push(Message::User(UserMessage { content: UserContent::Text("injected".into()), timestamp: 0 }));
+            messages.push(Message::User(UserMessage {
+                input_id: None,
+                content: UserContent::Text("injected".into()),
+                timestamp: 0,
+            }));
             Box::pin(async move { Ok(Some(messages)) })
         })),
         ..GenerationHooks::default()

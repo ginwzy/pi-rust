@@ -217,7 +217,7 @@ async fn orphans_a_blocked_run_task_with_full_run_cleanup() {
     );
     let id = root.id;
     let stage = move |tx: Tx| async move {
-        let user = pi_ai::UserMessage { content: UserContent::Text("hi".into()), timestamp: 1 };
+        let user = pi_ai::UserMessage { input_id: None, content: UserContent::Text("hi".into()), timestamp: 1 };
         let draft = EntryDraft { model: Some(vec![Message::User(user)]), ..EntryDraft::new("pi.user") };
         let entry = tx.append_entry(id, draft).await?;
         let create = SubmissionCreate {

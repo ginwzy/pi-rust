@@ -35,7 +35,7 @@ static NOTE_DOC: LazyLock<DocToken<Note, RewindableConversation>> = LazyLock::ne
 });
 
 pub fn user(text: &str) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 pub fn noop_tool(name: &str) -> ToolRegistration {

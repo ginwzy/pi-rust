@@ -129,7 +129,7 @@ fn converts_messages_with_placeholders_grouped_results_and_replay() {
         })
     };
     let messages = vec![
-        Message::User(UserMessage { content: UserContent::Text("  ".into()), timestamp: 0 }),
+        Message::User(UserMessage { input_id: None, content: UserContent::Text("  ".into()), timestamp: 0 }),
         assistant(
             vec![
                 ContentBlock::Thinking {

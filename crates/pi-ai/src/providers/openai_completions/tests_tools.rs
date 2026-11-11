@@ -109,7 +109,7 @@ async fn copilot_models_send_dynamic_headers_below_request_headers() {
     let mut model = test_model(API, "github-copilot", &server.base_url);
     model.headers.insert("Openai-Intent".into(), "model-default".into());
     let image = ContentBlock::Image { data: "AAAA".into(), mime_type: "image/png".into() };
-    let user = Message::User(UserMessage { content: UserContent::Blocks(vec![image]), timestamp: 1 });
+    let user = Message::User(UserMessage { input_id: None, content: UserContent::Blocks(vec![image]), timestamp: 1 });
     let context = Context { messages: vec![user], ..Context::default() };
     collect(OpenAICompletions.stream(&model, &context, options())).await;
     let headers = server.request().await.headers;

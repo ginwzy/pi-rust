@@ -239,6 +239,7 @@ async fn streams_thinking_tool_calls_images_usage_and_aborts() {
     ])])
     .await;
     let user = Message::User(crate::types::UserMessage {
+        input_id: None,
         content: crate::types::UserContent::Blocks(vec![
             crate::types::ContentBlock::text("what is this"),
             crate::types::ContentBlock::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() },

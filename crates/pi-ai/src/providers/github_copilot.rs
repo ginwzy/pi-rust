@@ -69,6 +69,7 @@ mod tests {
 
     fn image_user() -> Message {
         Message::User(UserMessage {
+            input_id: None,
             content: UserContent::Blocks(vec![ContentBlock::Image {
                 data: "AA==".into(),
                 mime_type: "image/png".into(),

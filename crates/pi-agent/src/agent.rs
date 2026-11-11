@@ -341,7 +341,7 @@ impl Agent {
             blocks.extend(images);
             UserContent::Blocks(blocks)
         };
-        self.prompt_messages(vec![Message::User(UserMessage { content, timestamp: now_ms() })]).await
+        self.prompt_messages(vec![Message::User(UserMessage { input_id: None, content, timestamp: now_ms() })]).await
     }
 
     pub async fn prompt_messages(&self, messages: Vec<Message>) -> anyhow::Result<()> {

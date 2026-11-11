@@ -177,7 +177,11 @@ pub fn create_custom_message(
 }
 
 fn user_text(text: String, timestamp: i64) -> Message {
-    Message::User(UserMessage { content: UserContent::Blocks(vec![ContentBlock::text(text)]), timestamp })
+    Message::User(UserMessage {
+        input_id: None,
+        content: UserContent::Blocks(vec![ContentBlock::text(text)]),
+        timestamp,
+    })
 }
 
 /// Map coding agent roles to provider messages. Install it as the agent's `convert_to_llm`
@@ -202,7 +206,7 @@ fn convert_message(message: &Message) -> Option<Message> {
                 UserContent::Text(text) => UserContent::Blocks(vec![ContentBlock::text(text)]),
                 blocks => blocks,
             };
-            Some(Message::User(UserMessage { content, timestamp: custom.timestamp }))
+            Some(Message::User(UserMessage { input_id: None, content, timestamp: custom.timestamp }))
         }
         BranchSummaryMessage::ROLE => {
             let summary = BranchSummaryMessage::from_message(message)?;

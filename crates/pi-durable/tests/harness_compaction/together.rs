@@ -266,7 +266,11 @@ async fn survives_reopen_blocked_and_is_orphaned_on_abort_with_its_status_remove
 }
 
 fn note(kind: &str, text: &str) -> EntryDraft {
-    let message = Message::User(pi_ai::UserMessage { content: pi_ai::UserContent::Text(text.into()), timestamp: 0 });
+    let message = Message::User(pi_ai::UserMessage {
+        input_id: None,
+        content: pi_ai::UserContent::Text(text.into()),
+        timestamp: 0,
+    });
     EntryDraft { model: Some(vec![message]), ..EntryDraft::new(kind) }
 }
 

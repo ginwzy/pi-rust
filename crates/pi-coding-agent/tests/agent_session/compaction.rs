@@ -189,7 +189,7 @@ const COPILOT_413: &str = r#"github-copilot API error (413): {"message":"failed 
 const REQUEST_LIMIT: usize = 32 * 1024 * 1024;
 
 fn user(content: String, timestamp: i64) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(content), timestamp })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(content), timestamp })
 }
 
 fn assistant(model: &Model, content: Vec<ContentBlock>, stop: StopReason, timestamp: i64) -> Message {

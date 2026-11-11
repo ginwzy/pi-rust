@@ -17,7 +17,7 @@ fn model() -> Model {
 }
 
 fn user(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 fn assistant(timestamp: i64, total_tokens: u64) -> Message {

@@ -101,6 +101,7 @@ pub async fn generate_bug_report_summary(options: BugReportSummaryOptions<'_>) -
     let context = Context {
         system_prompt: Some(BUG_SUMMARY_SYSTEM_PROMPT.into()),
         messages: vec![Message::User(UserMessage {
+            input_id: None,
             content: UserContent::Blocks(vec![ContentBlock::text(prompt)]),
             timestamp: pi_ai::now_ms(),
         })],

@@ -207,6 +207,7 @@ async fn streams_tool_calls_and_sends_images() {
     .await;
     let image = ContentBlock::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() };
     let user = Message::User(crate::types::UserMessage {
+        input_id: None,
         content: crate::types::UserContent::Blocks(vec![ContentBlock::text("open it"), image]),
         timestamp: 1,
     });

@@ -153,6 +153,7 @@ fn image(data: &str) -> ContentBlock {
 async fn user_messages_drop_empty_text_parts() {
     let model = plain_catalog("openai", "gpt-4o-mini");
     let user = Message::User(UserMessage {
+        input_id: None,
         content: UserContent::Blocks(vec![ContentBlock::text(""), image("ZmFrZQ==")]),
         timestamp: 1,
     });

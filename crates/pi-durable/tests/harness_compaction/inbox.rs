@@ -98,7 +98,8 @@ async fn loses_an_application_edit_placed_while_a_compaction_summarizes() {
     chat.faux.summary(gated(&gate, summary(), Some(&reached)));
     let task = chat.compact(None).await;
     reached.wait().await;
-    let redacted = Message::User(UserMessage { content: UserContent::Text("REDACTED".into()), timestamp: 0 });
+    let redacted =
+        Message::User(UserMessage { input_id: None, content: UserContent::Text("REDACTED".into()), timestamp: 0 });
     let edit = ContextEdit { target: u1, action: ContextEditAction::Replace, messages: Some(vec![redacted]) };
     let entry = EntryDraft { edits: Some(vec![edit]), ..EntryDraft::new("app.redact") };
     chat.root.submit(SubmissionDraft::write(entry), &ctx()).await.unwrap();

@@ -196,7 +196,11 @@ async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Contex
             tools_removed: None,
             timestamp: now,
         }),
-        Message::User(UserMessage { content: UserContent::Blocks(vec![ContentBlock::text(prompt)]), timestamp: now }),
+        Message::User(UserMessage {
+            input_id: None,
+            content: UserContent::Blocks(vec![ContentBlock::text(prompt)]),
+            timestamp: now,
+        }),
     ];
     let stream = &request.stream_options;
     let options = SimpleStreamOptions {
@@ -366,8 +370,11 @@ async fn place_summary(
     let input: CompactionInput = current.input.deserialize_into()?;
     let mut data = JsonMap::new();
     data.insert("reason", input.reason.as_str());
-    let message =
-        UserMessage { content: UserContent::Blocks(vec![ContentBlock::text(text)]), timestamp: runtime.now() as i64 };
+    let message = UserMessage {
+        input_id: None,
+        content: UserContent::Blocks(vec![ContentBlock::text(text)]),
+        timestamp: runtime.now() as i64,
+    };
     let entry = EntryDraft {
         model: Some(vec![Message::User(message)]),
         data: Some(Json::from(data)),

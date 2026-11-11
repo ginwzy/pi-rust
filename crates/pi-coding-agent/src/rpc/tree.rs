@@ -146,7 +146,7 @@ mod tests {
     use super::*;
 
     fn user(text: &str) -> Message {
-        Message::User(UserMessage { content: pi_ai::UserContent::Text(text.into()), timestamp: 1 })
+        Message::User(UserMessage { input_id: None, content: pi_ai::UserContent::Text(text.into()), timestamp: 1 })
     }
 
     #[test]

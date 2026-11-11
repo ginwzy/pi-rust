@@ -27,7 +27,7 @@ fn model(base_url: &str) -> Model {
 }
 
 fn context() -> Context {
-    let user = Message::User(UserMessage { content: UserContent::Text("Hello".into()), timestamp: 7 });
+    let user = Message::User(UserMessage { input_id: None, content: UserContent::Text("Hello".into()), timestamp: 7 });
     Context { messages: vec![user], ..Context::default() }
 }
 
@@ -238,6 +238,7 @@ async fn streams_thinking_and_serializes_image_context() {
     .await;
     let image = ContentBlock::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() };
     let user = Message::User(UserMessage {
+        input_id: None,
         content: UserContent::Blocks(vec![ContentBlock::text("see"), image]),
         timestamp: 3,
     });

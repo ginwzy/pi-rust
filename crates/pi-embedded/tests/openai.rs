@@ -25,7 +25,7 @@ fn model() -> Model {
 }
 
 fn context() -> Context {
-    let user = Message::User(UserMessage { content: UserContent::Text("hello".into()), timestamp: 1 });
+    let user = Message::User(UserMessage { input_id: None, content: UserContent::Text("hello".into()), timestamp: 1 });
     Context { system_prompt: None, messages: vec![user], tools: Vec::new() }
 }
 

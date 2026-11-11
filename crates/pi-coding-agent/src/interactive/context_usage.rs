@@ -250,7 +250,7 @@ mod tests {
         let tools = [Tool::new("read", "Read a file", json!({"type": "object"}))];
         let messages = vec![
             system(800),
-            Message::User(UserMessage { content: UserContent::Text(text_of(12)), timestamp: 0 }),
+            Message::User(UserMessage { input_id: None, content: UserContent::Text(text_of(12)), timestamp: 0 }),
             assistant(20),
             tool_result(400),
         ];

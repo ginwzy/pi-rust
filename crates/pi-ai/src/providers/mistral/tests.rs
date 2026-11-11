@@ -51,6 +51,7 @@ fn image(data: &str) -> ContentBlock {
 async fn serializes_sdk_payloads_to_the_wire_format() {
     let server = MockHttp::start(vec![sse(&[terminal("stop")]).header("x-request-id", "request-1")]).await;
     let user = Message::User(UserMessage {
+        input_id: None,
         content: UserContent::Blocks(vec![ContentBlock::text("describe"), image("aGVsbG8=")]),
         timestamp: 1,
     });

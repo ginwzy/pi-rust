@@ -52,7 +52,7 @@ fn text(label: &str, tokens: usize) -> String {
 }
 
 fn user(content: &str) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(content.into()), timestamp: 0 })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(content.into()), timestamp: 0 })
 }
 
 fn assistant(content: &str, calls: &[&str], stop_reason: StopReason) -> Message {

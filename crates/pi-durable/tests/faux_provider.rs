@@ -16,7 +16,7 @@ use pi_durable::testing::faux::{
 use serde_json::json;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: now_ms() })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: now_ms() })
 }
 
 fn hi() -> Context {
@@ -218,7 +218,11 @@ async fn estimates_prompt_and_output_tokens_from_serialized_context() {
     let context = Context {
         system_prompt: Some("sys".into()),
         messages: vec![
-            Message::User(UserMessage { content: UserContent::Blocks(vec![faux_text("hello"), image]), timestamp: 1 }),
+            Message::User(UserMessage {
+                input_id: None,
+                content: UserContent::Blocks(vec![faux_text("hello"), image]),
+                timestamp: 1,
+            }),
             Message::Assistant(message("prior")),
             Message::ToolResult(ToolResultMessage {
                 tool_call_id: "tool-1".into(),
@@ -284,7 +288,9 @@ async fn simulates_prompt_caching_per_session_id() {
 async fn counts_cached_characters_up_to_the_first_difference_in_the_joined_prompt() {
     let faux = faux_provider(RegisterFauxProviderOptions::default());
     faux.set_responses([message("a"), message("b"), message("c")]);
-    let user_at = |text: &str| Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 1 });
+    let user_at = |text: &str| {
+        Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
+    };
     let context = |messages: Vec<Message>| Context { messages, ..Context::default() };
     // Prompt texts: "user:hello world" (16 characters), then 16 + 2 + "user:next" (9) = 27.
     let first = complete(&faux, &context(vec![user_at("hello world")]), session("session-1")).await;

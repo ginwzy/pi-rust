@@ -58,6 +58,9 @@ fn check_cancelled(cancel: Option<&CancellationToken>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Persist a prepared queued input before the SDK exposes it to the agent loop.
+pub type QueuedInputFn = Arc<dyn Fn(&UserMessage, StreamingBehavior) -> anyhow::Result<()> + Send + Sync>;
+
 /// Options of [`AgentSession::prompt_with`].
 #[derive(Clone)]
 pub struct PromptOptions {
@@ -69,6 +72,10 @@ pub struct PromptOptions {
     pub images: Vec<ContentBlock>,
     /// Required while streaming.
     pub streaming_behavior: Option<StreamingBehavior>,
+    /// Opaque host identity carried by this input's user-message events only.
+    pub input_id: Option<String>,
+    /// Called after expansion and input hooks, before enqueueing. Failure prevents enqueueing.
+    pub queued_input: Option<QueuedInputFn>,
     /// Called once the prompt is accepted, before the run, with its disposition.
     pub preflight_result: Option<Arc<dyn Fn(PromptDisposition) + Send + Sync>>,
     /// Where the input came from for `input` handlers: `interactive` (default), `rpc`, or
@@ -83,6 +90,8 @@ impl Default for PromptOptions {
             expand_prompt_templates: true,
             images: Vec::new(),
             streaming_behavior: None,
+            input_id: None,
+            queued_input: None,
             preflight_result: None,
             source: None,
         }
@@ -106,7 +115,7 @@ pub struct BranchPrompt {
 /// The message that starts a run, as `before_agent_start` handlers see it.
 pub(crate) enum RunTrigger {
     /// A prompt, with its expanded text and images.
-    User { prompt: String, images: Vec<ContentBlock>, from_extension: bool },
+    User { prompt: String, images: Vec<ContentBlock>, from_extension: bool, input_id: Option<String> },
     /// A custom message sent with `triggerTurn` while idle.
     Custom(CustomMessage),
 }
@@ -135,7 +144,7 @@ impl RunTrigger {
 fn user_message(text: &str, images: Vec<ContentBlock>) -> Message {
     let mut blocks = vec![ContentBlock::text(text)];
     blocks.extend(images);
-    Message::User(UserMessage { content: UserContent::Blocks(blocks), timestamp: pi_ai::now_ms() })
+    Message::User(UserMessage { input_id: None, content: UserContent::Blocks(blocks), timestamp: pi_ai::now_ms() })
 }
 
 impl AgentSession {
@@ -195,7 +204,14 @@ impl AgentSession {
                     "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
                 );
             };
-            self.queue_message(&expanded, input_images, behavior, from_extension);
+            let mut message = user_message(&expanded, input_images);
+            if let Message::User(user) = &mut message {
+                user.input_id = options.input_id.clone();
+                if let Some(save) = &options.queued_input {
+                    save(user, behavior)?;
+                }
+            }
+            self.enqueue_user_message(message, behavior, from_extension);
             preflight(PromptDisposition::Queued);
             return Ok(PromptDisposition::Queued);
         }
@@ -205,7 +221,8 @@ impl AgentSession {
         }
         self.ensure_auth().await?;
         check_cancelled(options.cancel.as_ref())?;
-        let trigger = RunTrigger::User { prompt: expanded, images: input_images, from_extension };
+        let trigger =
+            RunTrigger::User { prompt: expanded, images: input_images, from_extension, input_id: options.input_id };
         self.start_run(trigger, options.cancel.as_ref(), || preflight(PromptDisposition::Started)).await?;
         Ok(PromptDisposition::Started)
     }
@@ -278,10 +295,13 @@ impl AgentSession {
         // Admission begins here. A later stop preserves the accepted input and aborts its run.
         check_cancelled(cancel)?;
         let mut messages = match trigger {
-            RunTrigger::User { prompt, images, from_extension } => {
+            RunTrigger::User { prompt, images, from_extension, input_id } => {
                 let (images, hints) = self.normalize_prompt_images(images);
                 let text = if hints.is_empty() { prompt.clone() } else { format!("{prompt}\n\n{}", hints.join("\n")) };
-                let message = user_message(&text, images);
+                let mut message = user_message(&text, images);
+                if let Message::User(user) = &mut message {
+                    user.input_id = input_id.clone();
+                }
                 if *from_extension {
                     self.note_extension_prompt(&message);
                 }
@@ -383,15 +403,25 @@ impl AgentSession {
     }
 
     fn queue_message(&self, text: &str, images: Vec<ContentBlock>, behavior: StreamingBehavior, from_extension: bool) {
+        self.enqueue_user_message(user_message(text, images), behavior, from_extension);
+    }
+
+    /// Restore already prepared input without re-running input hooks or starting execution.
+    pub fn restore_queued_input(&self, message: UserMessage, behavior: StreamingBehavior) {
+        self.enqueue_user_message(Message::User(message), behavior, false);
+    }
+
+    fn enqueue_user_message(&self, message: Message, behavior: StreamingBehavior, from_extension: bool) {
+        let Message::User(user) = &message else { return };
+        let text = super::listener::content_text(&user.content);
         {
             let mut state = lock(&self.state);
             match behavior {
-                StreamingBehavior::Steer => state.steering.push(text.to_string()),
-                StreamingBehavior::FollowUp => state.follow_up.push(text.to_string()),
+                StreamingBehavior::Steer => state.steering.push(text),
+                StreamingBehavior::FollowUp => state.follow_up.push(text),
             }
         }
         self.emit_queue_update();
-        let message = user_message(text, images);
         if from_extension {
             self.note_extension_prompt(&message);
         }

@@ -41,7 +41,7 @@ impl Compactor for TestCompactor {
 }
 
 fn user(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 fn compactor(summary: &str) -> TestCompactor {

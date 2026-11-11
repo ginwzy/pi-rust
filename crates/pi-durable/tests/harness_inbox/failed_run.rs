@@ -80,6 +80,7 @@ async fn queued_writes_behind_a_failed_run_are_placed_with_continue_and_kept_wit
         let first = root.submit(SubmissionDraft::input("first"), &ctx()).await.unwrap();
         reached.notified().await;
         let note = Message::User(pi_ai::UserMessage {
+            input_id: None,
             content: pi_ai::UserContent::Text("a note the model sees".into()),
             timestamp: 1,
         });

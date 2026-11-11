@@ -162,6 +162,9 @@ impl UserContent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserMessage {
+    /// Host input identity, carried through queues and events but never sent to providers or saved in message content.
+    #[serde(skip)]
+    pub input_id: Option<String>,
     pub content: UserContent,
     pub timestamp: i64,
 }
@@ -403,7 +406,7 @@ impl<'de> Deserialize<'de> for Message {
 
 impl Message {
     pub fn user(text: impl Into<String>) -> Self {
-        Self::User(UserMessage { content: UserContent::Text(text.into()), timestamp: now_ms() })
+        Self::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: now_ms() })
     }
 
     pub fn role(&self) -> &str {

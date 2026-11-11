@@ -365,6 +365,7 @@ async fn unsupported_images_fail_before_sending() {
     let model = bedrock_model("us.anthropic.claude-opus-4-8", "http://127.0.0.1:9");
     let image = ContentBlock::Image { data: "AA==".into(), mime_type: "image/bmp".into() };
     let user = crate::types::Message::User(crate::types::UserMessage {
+        input_id: None,
         content: crate::types::UserContent::Blocks(vec![image]),
         timestamp: 0,
     });

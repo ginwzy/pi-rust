@@ -148,6 +148,7 @@ fn history(model_id: &str) -> Vec<Message> {
     };
     vec![
         Message::User(UserMessage {
+            input_id: None,
             content: UserContent::Blocks(vec![
                 ContentBlock::text("Look"),
                 ContentBlock::Image { data: "AAAA".into(), mime_type: "image/png".into() },

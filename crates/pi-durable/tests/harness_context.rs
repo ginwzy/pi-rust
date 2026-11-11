@@ -23,7 +23,7 @@ use support::context;
 use support::harness_support::*;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 fn assistant(text: &str, stop_reason: StopReason) -> Message {

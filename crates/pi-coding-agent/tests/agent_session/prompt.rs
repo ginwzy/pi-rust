@@ -1,6 +1,8 @@
 //! Prompting, queues, and the transcript system prompt (upstream `agent-session-prompt`,
 //! `agent-session-queue`, `agent-session-concurrent`, and `agent-session-retry-events` tests).
 
+mod queue;
+
 use std::sync::Arc;
 use std::time::Duration;
 

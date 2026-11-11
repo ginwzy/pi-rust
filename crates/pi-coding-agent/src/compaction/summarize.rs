@@ -125,6 +125,7 @@ pub(crate) fn summarization_context(prompt: String) -> Context {
     Context {
         system_prompt: Some(SUMMARIZATION_SYSTEM_PROMPT.into()),
         messages: vec![Message::User(UserMessage {
+            input_id: None,
             content: UserContent::Blocks(vec![ContentBlock::text(prompt)]),
             timestamp: pi_ai::now_ms(),
         })],

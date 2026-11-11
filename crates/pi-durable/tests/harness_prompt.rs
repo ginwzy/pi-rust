@@ -20,7 +20,7 @@ use support::context;
 use support::task_support::open_tasks;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 fn sections(pairs: &[(&str, &str)]) -> Sections {

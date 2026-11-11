@@ -88,7 +88,7 @@ pub fn kinds(entries: &[EntryRecord]) -> Vec<String> {
 
 /// A write that affects model context, so it queues while busy; a data-only write is appended at once.
 pub fn queued_note(text: &str) -> EntryDraft {
-    let message = Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 0 });
+    let message = Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 0 });
     EntryDraft { model: Some(vec![message]), ..EntryDraft::new("note") }
 }
 
