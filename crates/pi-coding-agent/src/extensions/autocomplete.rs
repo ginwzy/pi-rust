@@ -53,8 +53,21 @@ impl JsAutocompleteProvider {
         cursor_col: usize,
         force: bool,
     ) -> Result<Option<AutocompleteSuggestions>, JsError> {
+        self.suggest_scoped_async(None, lines, cursor_line, cursor_col, force).await
+    }
+
+    /// Associate default-provider callbacks with one headless host request.
+    pub async fn suggest_scoped_async(
+        &self,
+        request_id: Option<u64>,
+        lines: &[String],
+        cursor_line: usize,
+        cursor_col: usize,
+        force: bool,
+    ) -> Result<Option<AutocompleteSuggestions>, JsError> {
         let col = byte_to_utf16(line(lines, cursor_line), cursor_col);
-        let args = self.args("getSuggestions", json!([lines, cursor_line, col, {"force": force}]));
+        let mut args = self.args("getSuggestions", json!([lines, cursor_line, col, {"force": force}]));
+        args.push(HostValue::Json(json!(request_id)));
         let result = self.host.call_method("autocomplete", args).await?.into_json();
         Ok(parse_suggestions(&result))
     }
@@ -67,8 +80,22 @@ impl JsAutocompleteProvider {
         item: &AutocompleteItem,
         prefix: &str,
     ) -> Result<CompletionResult, JsError> {
+        self.apply_scoped_async(None, lines, cursor_line, cursor_col, item, prefix).await
+    }
+
+    /// Associate default-provider callbacks during apply with one headless host request.
+    pub async fn apply_scoped_async(
+        &self,
+        request_id: Option<u64>,
+        lines: &[String],
+        cursor_line: usize,
+        cursor_col: usize,
+        item: &AutocompleteItem,
+        prefix: &str,
+    ) -> Result<CompletionResult, JsError> {
         let col = byte_to_utf16(line(lines, cursor_line), cursor_col);
-        let args = self.args("applyCompletion", json!([lines, cursor_line, col, item_json(item), prefix]));
+        let mut args = self.args("applyCompletion", json!([lines, cursor_line, col, item_json(item), prefix]));
+        args.push(HostValue::Json(json!(request_id)));
         let value = self.host.call_method("autocomplete", args).await?.into_json();
         if value.is_null() {
             return Ok(apply_default_completion(lines, cursor_line, cursor_col, item, prefix));

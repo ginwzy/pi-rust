@@ -279,8 +279,13 @@ pub(crate) async fn autocomplete_base(runner: &ExtensionRunner, args: &Args) -> 
     let lines: Vec<String> = serde_json::from_value(args.json(1)).map_err(error)?;
     let line = args.u64(2) as usize;
     let col = utf16_to_byte(lines.get(line).map_or("", String::as_str), args.u64(3) as usize);
-    let request =
-        crate::extension_ui::AutocompleteRequest { lines, cursor_line: line, cursor_col: col, force: args.bool(4) };
+    let request = crate::extension_ui::AutocompleteRequest {
+        lines,
+        cursor_line: line,
+        cursor_col: col,
+        force: args.bool(4),
+        request_id: args.json(5).as_u64(),
+    };
     let Some(suggestions) = runner.target_ui(args.u64(0)).autocomplete_base(request).await else {
         return Ok(Value::Null);
     };

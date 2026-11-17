@@ -1,11 +1,13 @@
 // `ctx.ui` (upstream `ExtensionUIContext`). Dialogs and plain calls go to the Rust `ExtensionUi`
 // of the session `target`; component factories stay here and Rust creates their components by id
 // when the TUI shows them (`createComponent`).
+import { AsyncLocalStorage } from "node:async_hooks";
 import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { call, callAsync, invokeCallback, optional, registerCallback, releaseCallback, signalId } from "./bridge.js";
 import { currentTheme, getEditorTheme, themeByName } from "./theme.js";
 
 const factories = new Map();
+const autocompleteRequests = new AsyncLocalStorage();
 let nextFactory = 1;
 
 /** Keep a component factory; Rust refers to it by the returned id. */
@@ -238,7 +240,7 @@ function overlayHandle(target, id) {
 function baseAutocomplete(target) {
 	return {
 		getSuggestions: async (lines, cursorLine, cursorCol, options) =>
-			optional(await callAsync("ui.autocompleteBase", target, lines, cursorLine, cursorCol, Boolean(options?.force))) ??
+			optional(await callAsync("ui.autocompleteBase", target, lines, cursorLine, cursorCol, Boolean(options?.force), autocompleteRequests.getStore() ?? null)) ??
 			null,
 		applyCompletion: (lines, cursorLine, cursorCol, item, prefix) =>
 			call("ui.autocompleteApply", lines, cursorLine, cursorCol, item, prefix),
@@ -262,19 +264,21 @@ export function autocompleteChain(target, ids) {
 }
 
 /** Called by Rust with a chain from `autocompleteChain`. */
-export async function autocomplete(chain, method, args) {
-	const provider = chain.provider;
-	if (typeof provider[method] !== "function") return null;
-	if (method !== "getSuggestions") return (await provider[method](...args)) ?? null;
-	const controller = new AbortController();
-	chain.controller?.abort();
-	chain.controller = controller;
-	args[3] = { ...args[3], signal: controller.signal };
-	try {
-		return (await provider[method](...args)) ?? null;
-	} finally {
-		if (chain.controller === controller) chain.controller = undefined;
-	}
+export async function autocomplete(chain, method, args, requestId) {
+	return autocompleteRequests.run(requestId, async () => {
+		const provider = chain.provider;
+		if (typeof provider[method] !== "function") return null;
+		if (method !== "getSuggestions") return (await provider[method](...args)) ?? null;
+		const controller = new AbortController();
+		chain.controller?.abort();
+		chain.controller = controller;
+		args[3] = { ...args[3], signal: controller.signal };
+		try {
+			return (await provider[method](...args)) ?? null;
+		} finally {
+			if (chain.controller === controller) chain.controller = undefined;
+		}
+	});
 }
 
 export function autocompleteCancel(chain) {

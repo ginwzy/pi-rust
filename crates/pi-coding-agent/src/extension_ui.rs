@@ -18,6 +18,8 @@ pub struct AutocompleteRequest {
     pub cursor_line: usize,
     pub cursor_col: usize,
     pub force: bool,
+    /// Host request identity, retained across asynchronous default-provider callbacks.
+    pub request_id: Option<u64>,
 }
 
 /// The run mode an extension sees as `ctx.mode`.

@@ -27,6 +27,7 @@ struct NativeUi {
     git_branch: Mutex<Value>,
     footer_reads: std::sync::atomic::AtomicUsize,
     autocomplete: Mutex<Vec<ComponentFactory>>,
+    autocomplete_requests: Mutex<Vec<Option<u64>>>,
 }
 
 impl NativeUi {
@@ -117,6 +118,7 @@ impl ExtensionUi for NativeUi {
     }
 
     async fn autocomplete_base(&self, request: AutocompleteRequest) -> Option<AutocompleteSuggestions> {
+        self.autocomplete_requests.lock().unwrap().push(request.request_id);
         let before = &request.lines[request.cursor_line][..request.cursor_col];
         let prefix = before.rsplit(' ').next().unwrap_or_default().to_string();
         let items = ["@native-two", "@pi-own"].map(|value| AutocompleteItem::new(value, value)).to_vec();
@@ -435,6 +437,7 @@ async fn headless_autocomplete_preserves_unicode_errors_and_cancellation() {
                 if (lines[row].endsWith("#error")) {
                     const error = new Error("completion failed"); error.code = "ERR_COMPLETION"; throw error;
                 }
+                await new Promise(resolve => setTimeout(resolve, 1));
                 return current.getSuggestions(lines, row, col, options);
             },
             applyCompletion: (lines, row, col, item, prefix) => item.value === "bad"
@@ -459,6 +462,10 @@ async fn headless_autocomplete_preserves_unicode_errors_and_cancellation() {
     let lines = vec![text.into()];
     let suggestions = provider.suggest_async(&lines, 0, text.len(), false).await.unwrap().unwrap();
     assert!(suggestions.items.iter().any(|item| item.value == "@pi-own"));
+    assert_eq!(*ui.autocomplete_requests.lock().unwrap(), [None]);
+    let suggestions = provider.suggest_scoped_async(Some(41), &lines, 0, text.len(), false).await.unwrap().unwrap();
+    assert!(suggestions.items.iter().any(|item| item.value == "@pi-own"));
+    assert_eq!(*ui.autocomplete_requests.lock().unwrap(), [None, Some(41)]);
     let applied =
         provider.apply_async(&lines, 0, text.len(), &AutocompleteItem::new("@pi-own", "file"), "@na").await.unwrap();
     assert_eq!(applied.lines, ["中文😀 @pi-own "]);
