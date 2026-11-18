@@ -30,6 +30,14 @@ pub trait ReadOperations: Send + Sync {
 /// Backend of the write tool.
 #[async_trait]
 pub trait WriteOperations: Send + Sync {
+    /// Optional display snapshot from the same backend as the write.
+    async fn preview_before_write(
+        &self,
+        _path: &Path,
+        _limit: Option<usize>,
+    ) -> Option<super::file_changes::PriorContent> {
+        None
+    }
     async fn write_file(&self, absolute_path: &Path, content: &str) -> anyhow::Result<()>;
     /// Create the directory and its parents.
     async fn mkdir(&self, dir: &Path) -> anyhow::Result<()>;
@@ -105,6 +113,26 @@ impl ReadOperations for LocalFileOperations {
 
 #[async_trait]
 impl WriteOperations for LocalFileOperations {
+    async fn preview_before_write(
+        &self,
+        path: &Path,
+        limit: Option<usize>,
+    ) -> Option<super::file_changes::PriorContent> {
+        use super::file_changes::PriorContent;
+        let meta = match tokio::fs::metadata(path).await {
+            Err(e) if e.kind() == ErrorKind::NotFound => return Some(PriorContent::Missing),
+            meta => meta.ok()?,
+        };
+        if !meta.is_file() {
+            return None;
+        }
+        let Some(limit) = limit.filter(|&max| meta.len() <= max as u64) else {
+            return Some(PriorContent::NotRestorable("preview budget exceeded".into()));
+        };
+        let mut bytes = Vec::new();
+        tokio::fs::File::open(path).await.ok()?.take(limit as u64 + 1).read_to_end(&mut bytes).await.ok()?;
+        (bytes.len() <= limit).then_some(PriorContent::Bytes(bytes))
+    }
     async fn write_file(&self, absolute_path: &Path, content: &str) -> anyhow::Result<()> {
         Ok(tokio::fs::write(absolute_path, content.as_bytes()).await?)
     }

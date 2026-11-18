@@ -16,6 +16,7 @@ mod bash;
 mod edit;
 pub mod edit_diff;
 mod file_changes;
+pub mod file_result;
 mod find;
 mod grep;
 mod ls;

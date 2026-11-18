@@ -119,7 +119,10 @@ async fn read_write_and_edit_use_custom_operations() {
     assert!(exec(&read, json!({ "path": "missing.txt" })).await.is_err());
 
     let write = tool("write", "/remote", options.clone());
-    exec(&write, json!({ "path": "sub/b.txt", "content": "new" })).await.unwrap();
+    let written = exec(&write, json!({ "path": "sub/b.txt", "content": "new" })).await.unwrap();
+    let report = crate::tools::file_result::FileResult::stored(written.details.as_ref().unwrap()).unwrap();
+    assert_eq!(report["entries"][0]["operation"], "write");
+    assert_eq!(report["entries"][0]["preview"]["kind"], "unavailable");
     assert_eq!(fs.get(Path::new("/remote/sub/b.txt")).unwrap(), "new");
     assert_eq!(*fs.made_dirs.lock().unwrap(), vec![PathBuf::from("/remote/sub")]);
 
@@ -127,6 +130,23 @@ async fn read_write_and_edit_use_custom_operations() {
     let args = json!({ "path": "a.txt", "edits": [{ "oldText": "world", "newText": "there" }] });
     exec(&edit, args).await.unwrap();
     assert_eq!(fs.get(Path::new("/remote/a.txt")).unwrap(), "hello\nthere");
+}
+
+#[tokio::test]
+async fn write_preview_respects_combined_input_limit_and_keeps_existence() {
+    use crate::tools::{
+        LocalFileOperations,
+        file_changes::PriorContent,
+        file_result::{INPUT_LIMIT, Preview},
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("file");
+    let read = |size| LocalFileOperations.preview_before_write(&path, Preview::old_limit(size));
+    assert!(matches!(read(INPUT_LIMIT + 1).await, Some(PriorContent::Missing)));
+    std::fs::write(&path, "abc").unwrap();
+    assert!(matches!(read(INPUT_LIMIT + 1).await, Some(PriorContent::NotRestorable(_))));
+    assert!(matches!(read(INPUT_LIMIT - 2).await, Some(PriorContent::NotRestorable(_))));
+    assert!(matches!(read(INPUT_LIMIT - 3).await, Some(PriorContent::Bytes(bytes)) if bytes == b"abc"));
 }
 
 struct OfflineEdit;

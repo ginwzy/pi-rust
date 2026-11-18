@@ -90,12 +90,36 @@ impl AgentTool for WriteTool {
             }
             check_aborted(&cancel)?;
             let write = || self.operations.write_file(&absolute, &args.content);
-            write_recorded(self.recorder.as_ref(), &absolute, None, &args.content, write)
+            use super::{
+                file_changes::PriorContent,
+                file_result::{FileChange, FileResult, Operation, Preview},
+            };
+            let before = self.operations.preview_before_write(&absolute, Preview::old_limit(args.content.len())).await;
+            check_aborted(&cancel)?;
+            let known = match &before {
+                Some(PriorContent::Bytes(bytes)) => Some(bytes.as_slice()),
+                _ => None,
+            };
+            write_recorded(self.recorder.as_ref(), &absolute, known, &args.content, write)
                 .await
                 .with_context(|| format!("Could not write file {}", absolute.display()))?;
             check_aborted(&cancel)?;
             let bytes = args.content.len();
-            Ok(AgentToolResult::text(format!("Successfully wrote {bytes} bytes to {}", args.path)))
+            let result = AgentToolResult::text(format!("Successfully wrote {bytes} bytes to {}", args.path));
+            let (operation, preview) = match before {
+                Some(PriorContent::Missing) => (Operation::Create, Preview::between("", &args.content)),
+                Some(PriorContent::Bytes(old)) => (
+                    Operation::Update,
+                    std::str::from_utf8(&old).map_or(Preview::Unavailable, |old| Preview::between(old, &args.content)),
+                ),
+                Some(PriorContent::NotRestorable(_)) => (Operation::Update, Preview::Unavailable),
+                _ => (Operation::Write, Preview::Unavailable),
+            };
+            let mut report = FileResult::default();
+            report.push(FileChange { operation, path: args.path, to: None, preview });
+            let mut details = json!({});
+            report.attach(&mut details);
+            Ok(result.with_details(details))
         })
         .await
     }

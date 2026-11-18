@@ -180,6 +180,15 @@ impl AgentTool for EditTool {
             let (diff, first_changed_line) = generate_diff_string(&base, &new_content);
             let patch = generate_unified_patch(path, &base, &new_content);
             let mut details = json!({ "diff": diff, "patch": patch });
+            use super::file_result::{FileChange, FileResult, Operation, Preview};
+            let mut report = FileResult::default();
+            report.push(FileChange {
+                operation: Operation::Update,
+                path: path.into(),
+                to: None,
+                preview: Preview::ExistingEditDiff,
+            });
+            report.attach(&mut details);
             if let Some(line) = first_changed_line {
                 details["firstChangedLine"] = json!(line);
             }
