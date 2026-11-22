@@ -4,6 +4,7 @@
 use pi_ai::{Message, SystemMessage, Usage, UserContent};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
+use std::sync::Arc;
 
 /// One raw JSON line of a session file (header or entry), in stored key order.
 pub type FileEntry = Map<String, Value>;
@@ -217,7 +218,8 @@ pub struct Entry {
     parent_id: Option<String>,
     timestamp: String,
     data: EntryData,
-    raw: FileEntry,
+    // Always an object; snapshots can keep the original JSON without rebuilding it.
+    raw: Arc<Value>,
 }
 
 fn string_field(raw: &FileEntry, key: &str) -> Option<String> {
@@ -235,7 +237,7 @@ impl Entry {
             timestamp: string_field(&raw, "timestamp").unwrap_or_default(),
             kind,
             data,
-            raw,
+            raw: Arc::new(Value::Object(raw)),
         }
     }
 
@@ -270,11 +272,17 @@ impl Entry {
 
     /// The stored JSON object, in file key order.
     pub fn raw(&self) -> &FileEntry {
-        &self.raw
+        self.raw.as_object().expect("entry is an object")
+    }
+
+    /// An immutable handle to the same stored object returned by `raw`.
+    pub fn shared_raw(&self) -> Arc<Value> {
+        self.raw.clone()
     }
 
     pub fn into_raw(self) -> FileEntry {
-        self.raw
+        let Value::Object(raw) = Arc::unwrap_or_clone(self.raw) else { unreachable!("entry is an object") };
+        raw
     }
 
     /// The stored message of a `message` entry.
@@ -306,7 +314,7 @@ impl Entry {
 
     /// A copy with `key` set (or removed for `None`), keeping its position in the object.
     pub(crate) fn with_field(&self, key: &str, value: Option<Value>) -> Self {
-        let mut raw = self.raw.clone();
+        let mut raw = self.raw().clone();
         match value {
             Some(value) => {
                 raw.insert(key.to_string(), value);
@@ -323,7 +331,7 @@ impl Entry {
     }
 
     pub fn to_json_line(&self) -> String {
-        serde_json::to_string(&self.raw).unwrap_or_default()
+        serde_json::to_string(self.raw()).unwrap_or_default()
     }
 }
 
@@ -376,6 +384,12 @@ mod tests {
         assert!(matches!(entry.data(), EntryData::Custom { custom_type, .. } if custom_type == "ext"));
         let moved = entry.with_parent(Some("p"));
         assert_eq!(moved.to_json_line(), line.replace("null", "\"p\""));
+        let held = entry.shared_raw();
+        assert!(std::ptr::eq(entry.raw(), held.as_object().unwrap()));
+        assert!(!Arc::ptr_eq(&held, &moved.shared_raw()));
+        assert_eq!(serde_json::to_string(&entry.into_raw()).unwrap(), line);
+        assert_eq!(held.to_string(), line);
+        assert_eq!(moved.into_raw()["parentId"], "p");
     }
 
     #[test]
