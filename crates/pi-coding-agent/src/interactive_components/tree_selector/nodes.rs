@@ -113,7 +113,8 @@ fn push_children(stack: &mut Vec<StackItem>, children: &[usize], indent: usize, 
 
 /// Tool calls of an assistant message entry, from its stored JSON.
 fn collect_tool_calls(entry: &Entry, tool_calls: &mut HashMap<String, ToolCallInfo>) {
-    let Some(message) = entry.raw().get("message") else { return };
+    let raw = entry.to_raw_map();
+    let Some(message) = raw.get("message") else { return };
     if entry.kind() != "message" || message.get("role").and_then(Value::as_str) != Some("assistant") {
         return;
     }

@@ -117,7 +117,7 @@ struct Scan {
 fn scan<'a>(entries: impl IntoIterator<Item = &'a Entry>, prices: &dyn ModelPriceSource) -> Scan {
     let mut result = Scan { last: None, totals: CacheWasteTotals::default(), misses: HashMap::new() };
     for entry in entries {
-        match entry.data() {
+        match entry.data().as_ref() {
             // The context changed on purpose; model switches are not exempt.
             EntryData::Compaction(_) | EntryData::BranchSummary(_) => result.last = None,
             EntryData::Usage(usage) if usage.kind == "cache_warm" => {

@@ -64,7 +64,7 @@ pub fn prepare_compaction_entries(
     let previous_index =
         entries.iter().position(|entry| entry.source.compaction().is_some() && !entry.messages.is_empty());
     let previous_compaction = previous_index.and_then(|index| entries[index].source.compaction());
-    let previous_summary = previous_compaction.map(|compaction| compaction.summary.clone());
+    let previous_summary = previous_compaction.as_ref().map(|compaction| compaction.summary.clone());
     let boundary_start = previous_index.map_or(0, |index| index + 1);
     let tokens_before = estimate_projected_context_tokens(&projection, path_entries).tokens;
     let cut = find_projected_cut_point(entries, boundary_start, entries.len(), settings.keep_recent_tokens);

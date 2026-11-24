@@ -7,6 +7,7 @@ use serde_json::{Map, Value, json};
 
 use crate::cache_stats::CacheMiss;
 use crate::compaction::CompactionResult;
+use crate::session::Entry;
 use crate::virtual_models::{ModelRouteReason, RoutedModel};
 
 /// Why a compaction ran.
@@ -64,7 +65,7 @@ pub enum AgentSessionEvent<'a> {
     },
     /// A session entry appended outside the message flow, as stored.
     EntryAppended {
-        entry: std::sync::Arc<Value>,
+        entry: Entry,
     },
     SessionInfoChanged {
         name: Option<String>,

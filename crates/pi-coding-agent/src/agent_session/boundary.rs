@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::{AgentSession, lock};
 use crate::compaction::estimate_projected_context_tokens;
-use crate::session::{Entry, FileEntry, NewCompaction, PendingEntry, SessionManager, context};
+use crate::session::{Entry, NewCompaction, PendingEntry, SessionManager, context};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,7 +24,7 @@ struct Preview<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PreviewEntry<'a> {
-    source_entry: &'a FileEntry,
+    source_entry: &'a Entry,
     messages: &'a [Message],
 }
 
@@ -69,7 +69,7 @@ impl AgentSession {
             context_entries: projection
                 .entries
                 .iter()
-                .map(|entry| PreviewEntry { source_entry: entry.source.raw(), messages: &entry.messages })
+                .map(|entry| PreviewEntry { source_entry: entry.source, messages: &entry.messages })
                 .collect(),
             context_messages: &projection.messages,
             llm_messages: &llm,

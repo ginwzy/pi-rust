@@ -68,7 +68,7 @@ pub fn with_entries(entries: Vec<Value>) -> SessionManager {
 }
 
 pub fn raw_entries(session: &SessionManager) -> Vec<FileEntry> {
-    session.entries().iter().map(|entry| entry.raw().clone()).collect()
+    session.entries().iter().map(|entry| entry.to_raw_map()).collect()
 }
 
 pub fn ids(entries: &[&Entry]) -> Vec<String> {

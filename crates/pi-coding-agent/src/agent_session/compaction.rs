@@ -156,7 +156,7 @@ impl AgentSession {
             })?;
             let messages = session.build_session_projection().messages;
             result.estimated_tokens_after = Some(messages.iter().map(estimate_tokens).sum());
-            session.get_entry(&id).map(|entry| serde_json::Value::Object(entry.raw().clone()))
+            session.get_entry(&id).map(|entry| entry.to_value())
         };
         self.refresh_context();
         if let (Some(runner), Some(entry)) = (self.extension_runner(), entry) {
@@ -187,7 +187,7 @@ impl AgentSession {
         };
         let branch: Vec<serde_json::Value> = {
             let session = self.session_manager();
-            session.get_branch(None).into_iter().map(|entry| serde_json::Value::Object(entry.raw().clone())).collect()
+            session.get_branch(None).into_iter().map(|entry| entry.to_value()).collect()
         };
         let signal = runner.signal_id(cancel);
         let event = json!({

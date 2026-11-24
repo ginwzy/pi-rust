@@ -178,7 +178,7 @@ fn fork_from_copies_entries_with_a_parent_link() {
     assert_eq!(&header.id[14..15], "7");
     assert_eq!(header.parent_session.as_deref(), Some(source.to_str().unwrap()));
     assert_eq!(
-        forked.entries()[0].raw(),
+        &forked.entries()[0].to_raw_map(),
         &serde_json::from_value::<pi_coding_agent::session::FileEntry>(entry).unwrap()
     );
     let options = NewSessionOptions { id: Some("forked-session-id".into()), parent_session: None };
@@ -278,7 +278,9 @@ fn tool_and_summary_usage_survive_a_reload() {
     let entries = reopened.entries();
     assert_eq!(entries[3].compaction().unwrap().usage, Some(summary_usage));
     assert_eq!(entries[4].branch_summary().unwrap().usage, Some(summary_usage));
-    assert!(matches!(entries[2].message(), Some(Message::ToolResult(result)) if result.usage == Some(summary_usage)));
+    assert!(
+        matches!(entries[2].message().as_deref(), Some(Message::ToolResult(result)) if result.usage == Some(summary_usage))
+    );
     let stats = reopened.session_stats();
     assert_eq!((stats.user_messages, stats.assistant_messages, stats.tool_results, stats.total_messages), (1, 1, 1, 3));
     assert_eq!(stats.tokens.input, 1 + 10 * 3);

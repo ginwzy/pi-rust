@@ -61,8 +61,8 @@ impl SessionSnapshot {
     pub fn from_manager(manager: &crate::session::SessionManager) -> Self {
         Self {
             path: manager.session_file().map(Path::to_path_buf).unwrap_or_default(),
-            header: manager.header_raw().clone(),
-            entries: manager.entries().iter().map(|entry| Value::Object(entry.raw().clone())).collect(),
+            header: manager.header_value(),
+            entries: manager.entries().iter().map(|entry| entry.to_value()).collect(),
             leaf_id: Some(manager.leaf_id().map_or(Value::Null, Value::from)),
         }
     }

@@ -90,7 +90,7 @@ impl Routed {
         branch
             .iter()
             .filter_map(|entry| {
-                let raw = entry.raw();
+                let raw = entry.to_raw_map();
                 (raw["type"] == "custom" && raw["customType"] == VIRTUAL_MODEL_STATE_ENTRY).then(|| raw["data"].clone())
             })
             .collect()

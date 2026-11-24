@@ -504,7 +504,7 @@ impl AgentSession {
             sent.any(|(_, text)| *text == user.content.text())
         };
         let session = self.session_manager();
-        session.get_branch(None).into_iter().rev().find_map(|entry| match entry.data() {
+        session.get_branch(None).into_iter().rev().find_map(|entry| match entry.data().as_ref() {
             EntryData::Message(Message::User(user)) if !sent_by_extension(user) => Some(BranchPrompt {
                 entry_id: entry.id().to_string(),
                 parent_id: entry.parent_id().map(String::from),

@@ -39,7 +39,7 @@ impl CacheWarmerHost for SessionWarmerHost {
         let Some(session) = self.session.upgrade() else { return 0 };
         let manager = session.session_manager();
         let branch = manager.get_branch(None);
-        let usage = branch.iter().rev().find_map(|entry| match entry.data() {
+        let usage = branch.iter().rev().find_map(|entry| match entry.data().as_ref() {
             EntryData::Message(Message::Assistant(message)) => Some(message.usage),
             _ => None,
         });

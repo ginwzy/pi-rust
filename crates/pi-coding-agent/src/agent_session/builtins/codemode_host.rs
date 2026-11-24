@@ -91,12 +91,13 @@ impl CodemodeHost for SessionCodemodeHost {
         let Some(session) = self.session.upgrade() else { return Map::new() };
         let manager = session.session_manager();
         let branch = manager.get_branch(None);
-        let entries = branch.iter().filter_map(|entry| match entry.data() {
-            EntryData::Custom { custom_type, data } => Some((custom_type, data)),
-            _ => None,
+        let entries = branch.iter().filter(|entry| entry.kind() == "custom").filter_map(|entry| {
+            match entry.data().into_owned() {
+                EntryData::Custom { custom_type, data } => Some((custom_type, data)),
+                _ => None,
+            }
         });
-        let entries: Vec<(String, Value)> =
-            entries.map(|(kind, data)| (kind.clone(), data.clone().unwrap_or(Value::Null))).collect();
+        let entries: Vec<(String, Value)> = entries.map(|(kind, data)| (kind, data.unwrap_or(Value::Null))).collect();
         read_codemode_store(entries.iter().map(|(kind, data)| (kind.as_str(), data)))
     }
 

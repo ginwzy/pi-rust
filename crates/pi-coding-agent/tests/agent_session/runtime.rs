@@ -63,7 +63,7 @@ async fn forks_before_a_user_message_and_clones_the_branch() {
     let session = runtime.session();
     assert_ne!(session.session_file().unwrap(), original);
     assert_eq!(roles(&session.messages()), ["system", "user", "assistant"]);
-    let header = session.session_manager().header_raw().clone();
+    let header = session.session_manager().header_value();
     assert_eq!(header["parentSession"].as_str().unwrap(), original.display().to_string());
 
     let cloned = runtime.clone_session().await.unwrap();

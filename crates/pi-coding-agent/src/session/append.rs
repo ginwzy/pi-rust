@@ -5,7 +5,9 @@ use pi_ai::{ContentBlock, Message, SystemMessage, ThinkingLevel, Usage, UserCont
 use serde_json::{Value, json};
 
 use super::SessionManager;
-use super::entry::{Entry, EntryData};
+use super::entry::{
+    BranchSummaryEntry, CompactionEntry, ContextReplacement, CustomMessageEntry, Entry, EntryData, UsageEntry,
+};
 use super::ids::{iso_timestamp, parse_iso};
 
 /// Fields of a compaction entry. `first_kept_entry_id: None` keeps nothing before the entry.
@@ -19,35 +21,26 @@ pub struct NewCompaction {
     pub usage: Option<Usage>,
 }
 
-fn to_json<T: serde::Serialize>(value: &T) -> Option<Value> {
-    serde_json::to_value(value).ok()
-}
-
 pub(crate) struct PendingEntry<'a> {
     pub id: String,
     pub parent: Option<&'a str>,
 }
 
 impl PendingEntry<'_> {
-    fn link(self) -> [(&'static str, Option<Value>); 3] {
-        [
-            ("id", Some(json!(self.id))),
-            ("parentId", Some(json!(self.parent))),
-            ("timestamp", Some(json!(iso_timestamp()))),
-        ]
-    }
-
-    fn fields(self, kind: &str) -> Vec<(&'static str, Option<Value>)> {
-        let mut fields = vec![("type", Some(json!(kind)))];
-        fields.extend(self.link());
-        fields
+    fn native(self, kind: &str, data: EntryData) -> Entry {
+        Entry::native(kind, self.id, self.parent, iso_timestamp(), data)
     }
 
     pub fn custom(self, custom_type: &str, data: Option<Value>) -> Entry {
-        let mut fields =
-            vec![("type", Some(json!("custom"))), ("customType", Some(json!(custom_type))), ("data", data)];
-        fields.extend(self.link());
-        Entry::build(fields)
+        let Some(data) = data else {
+            return self.native("custom", EntryData::Custom { custom_type: custom_type.into(), data: None });
+        };
+        let Value::Object(entry) = json!({"type":"custom", "customType":custom_type, "data":data,
+            "id":self.id, "parentId":self.parent, "timestamp":iso_timestamp()})
+        else {
+            unreachable!()
+        };
+        Entry::from_raw(entry)
     }
 
     pub fn custom_message(
@@ -57,15 +50,10 @@ impl PendingEntry<'_> {
         display: bool,
         details: Option<Value>,
     ) -> Entry {
-        let mut fields = vec![
-            ("type", Some(json!("custom_message"))),
-            ("customType", Some(json!(custom_type))),
-            ("content", to_json(&content)),
-            ("display", Some(json!(display))),
-            ("details", details),
-        ];
-        fields.extend(self.link());
-        Entry::build(fields)
+        self.native(
+            "custom_message",
+            EntryData::CustomMessage(CustomMessageEntry { custom_type: custom_type.into(), content, display, details }),
+        )
     }
 
     pub fn compaction(self, mut system: Option<SystemMessage>, compaction: NewCompaction) -> Entry {
@@ -74,19 +62,21 @@ impl PendingEntry<'_> {
         if let Some(system) = &mut system {
             system.timestamp = parse_iso(&timestamp).unwrap_or_default();
         }
-        Entry::build(vec![
-            ("type", Some(json!("compaction"))),
-            ("id", Some(json!(self.id))),
-            ("parentId", Some(json!(self.parent))),
-            ("timestamp", Some(json!(timestamp))),
-            ("summary", Some(json!(compaction.summary))),
-            ("firstKeptEntryId", Some(json!(first_kept))),
-            ("tokensBefore", Some(json!(compaction.tokens_before))),
-            ("details", compaction.details),
-            ("usage", compaction.usage.as_ref().and_then(to_json)),
-            ("fromHook", compaction.from_hook.map(Value::Bool)),
-            ("systemMessage", system.as_ref().and_then(to_json)),
-        ])
+        Entry::native(
+            "compaction",
+            self.id,
+            self.parent,
+            timestamp,
+            EntryData::Compaction(CompactionEntry {
+                summary: compaction.summary,
+                first_kept_entry_id: first_kept,
+                tokens_before: compaction.tokens_before,
+                details: compaction.details,
+                usage: compaction.usage,
+                from_hook: compaction.from_hook,
+                system_message: system,
+            }),
+        )
     }
 
     pub fn context_edit(self, target: &Entry, replacement: Option<Value>) -> anyhow::Result<Entry> {
@@ -94,7 +84,8 @@ impl PendingEntry<'_> {
             anyhow::bail!("Context edit replacement must be null or contain string/array content");
         }
         let target_id = target.id();
-        let role = match target.data() {
+        let data = target.data();
+        let role = match data.as_ref() {
             EntryData::CustomMessage(_) => "custom",
             EntryData::Message(message) if matches!(message.role(), "user" | "assistant" | "toolResult") => {
                 message.role()
@@ -103,26 +94,28 @@ impl PendingEntry<'_> {
         };
         let replacement = match replacement {
             Some(Value::String(text)) if matches!(role, "assistant" | "toolResult") => {
-                json!({ "content": [ContentBlock::text(text)] })
+                Some(ContextReplacement { content: json!([ContentBlock::text(text)]) })
             }
-            Some(content) => json!({ "content": content }),
-            None => Value::Null,
+            Some(content) => Some(ContextReplacement { content }),
+            None => None,
         };
-        let mut fields = self.fields("context_edit");
-        fields.extend([("targetId", Some(json!(target_id))), ("replacement", Some(replacement))]);
-        Ok(Entry::build(fields))
+        Ok(self.native("context_edit", EntryData::ContextEdit { target_id: target_id.into(), replacement }))
+    }
+
+    fn message(self, message: &Message) -> Entry {
+        let stored = match message {
+            Message::User(user) if user.input_id.is_some() => {
+                pi_ai::UserMessage { input_id: None, content: user.content.clone(), timestamp: user.timestamp }.into()
+            }
+            _ => message.clone(),
+        };
+        self.native("message", EntryData::Message(stored))
     }
 }
 
 impl SessionManager {
-    fn append_typed(&mut self, kind: &str, fields: Vec<(&str, Option<Value>)>) -> anyhow::Result<String> {
-        let mut all = self.entry_fields(self.new_entry_id(), kind);
-        all.extend(fields);
-        self.append_entry(Entry::build(all))
-    }
-
-    fn entry_fields(&self, id: String, kind: &str) -> Vec<(&'static str, Option<Value>)> {
-        PendingEntry { id, parent: self.leaf_id() }.fields(kind)
+    fn append_typed(&mut self, kind: &str, data: EntryData) -> anyhow::Result<String> {
+        self.append_entry(self.pending_entry().native(kind, data))
     }
 
     fn pending_entry(&self) -> PendingEntry<'_> {
@@ -131,23 +124,27 @@ impl SessionManager {
 
     /// Append a message. Summary roles belong in compaction and branch summary entries instead.
     pub fn append_message(&mut self, message: &Message) -> anyhow::Result<String> {
-        let fields = self.entry_fields(self.new_entry_id(), "message");
-        self.append_entry(Entry::build_message(fields, message)?)
+        self.append_entry(self.pending_entry().message(message))
     }
 
     /// Append a message under an id from [`reserve_entry_id`](Self::reserve_entry_id).
     pub fn append_message_as(&mut self, id: &str, message: &Message) -> anyhow::Result<String> {
         anyhow::ensure!(self.reserved.remove(id), "entry id {id} is not reserved");
-        let fields = self.entry_fields(id.to_string(), "message");
-        self.append_entry(Entry::build_message(fields, message)?)
+        self.append_entry(PendingEntry { id: id.into(), parent: self.leaf_id() }.message(message))
     }
 
     pub fn append_thinking_level_change(&mut self, level: ThinkingLevel) -> anyhow::Result<String> {
-        self.append_typed("thinking_level_change", vec![("thinkingLevel", Some(json!(level.as_str())))])
+        self.append_typed(
+            "thinking_level_change",
+            EntryData::ThinkingLevelChange { thinking_level: level.as_str().into() },
+        )
     }
 
     pub fn append_model_change(&mut self, provider: &str, model_id: &str) -> anyhow::Result<String> {
-        self.append_typed("model_change", vec![("provider", Some(json!(provider))), ("modelId", Some(json!(model_id)))])
+        self.append_typed(
+            "model_change",
+            EntryData::ModelChange { provider: provider.into(), model_id: model_id.into() },
+        )
     }
 
     /// Model-attributed usage outside the LLM context, such as `cache_warm`.
@@ -161,13 +158,13 @@ impl SessionManager {
     ) -> anyhow::Result<String> {
         self.append_typed(
             "usage",
-            vec![
-                ("kind", Some(json!(kind))),
-                ("provider", Some(json!(provider))),
-                ("model", Some(json!(model))),
-                ("usage", to_json(usage)),
-                ("note", note.filter(|note| !note.is_empty()).map(|note| json!(note))),
-            ],
+            EntryData::Usage(UsageEntry {
+                kind: kind.into(),
+                provider: provider.into(),
+                model: model.into(),
+                usage: *usage,
+                note: note.filter(|note| !note.is_empty()).map(str::to_owned),
+            }),
         )
     }
 
@@ -213,7 +210,7 @@ impl SessionManager {
                 in_break = false;
             }
         }
-        self.append_typed("session_info", vec![("name", Some(json!(sanitized.trim())))])
+        self.append_typed("session_info", EntryData::SessionInfo { name: Some(sanitized.trim().into()) })
     }
 
     /// An extension message that enters the LLM context as a `custom` role message.
@@ -247,8 +244,8 @@ impl SessionManager {
         if self.get_entry(target_id).is_none() {
             anyhow::bail!("Entry {target_id} not found");
         }
-        let label_value = label.map(|label| json!(label));
-        let id = self.append_typed("label", vec![("targetId", Some(json!(target_id))), ("label", label_value)])?;
+        let id = self
+            .append_typed("label", EntryData::Label { target_id: target_id.into(), label: label.map(str::to_owned) })?;
         let timestamp = self.get_entry(&id).map(|entry| entry.timestamp().to_string()).unwrap_or_default();
         match label.filter(|label| !label.is_empty()) {
             Some(label) => {
@@ -281,13 +278,13 @@ impl SessionManager {
         self.bump_revision();
         self.append_typed(
             "branch_summary",
-            vec![
-                ("fromId", Some(json!(from_id))),
-                ("summary", Some(json!(summary))),
-                ("details", details),
-                ("usage", usage.as_ref().and_then(to_json)),
-                ("fromHook", from_hook.map(Value::Bool)),
-            ],
+            EntryData::BranchSummary(BranchSummaryEntry {
+                from_id,
+                summary: summary.into(),
+                details,
+                usage,
+                from_hook,
+            }),
         )
     }
 }

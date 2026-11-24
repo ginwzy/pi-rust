@@ -36,7 +36,7 @@ fn write_nodes(tree: &SessionTree<'_>, out: &mut String) {
             let index = siblings[next];
             let node = tree.node(index);
             out.push_str("{\"entry\":");
-            out.push_str(&Value::Object(node.entry.raw().clone()).to_string());
+            out.push_str(&node.entry.to_json_line());
             out.push_str(",\"children\":[");
             stack.push((&node.children, 0, Some(index)));
             continue;

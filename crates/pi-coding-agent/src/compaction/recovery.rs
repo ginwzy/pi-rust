@@ -82,12 +82,16 @@ pub fn check_compaction(session: &SessionManager, input: CompactionCheckInput) -
     let index = entry_id.and_then(|id| branch.iter().position(|entry| entry.id() == id));
     let after = index.map_or(&[][..], |index| &branch[index + 1..]);
     let edited_after = after.iter().any(|entry| entry.kind() == "context_edit");
-    let latest_edit = after.iter().rev().find_map(|entry| match entry.data() {
-        EntryData::ContextEdit { target_id, replacement } if Some(target_id.as_str()) == entry_id => Some(replacement),
-        _ => None,
+    let latest_edit = after.iter().rev().filter(|entry| entry.kind() == "context_edit").find_map(|entry| {
+        match entry.data().as_ref() {
+            EntryData::ContextEdit { target_id, replacement } if Some(target_id.as_str()) == entry_id => {
+                Some(replacement.is_some())
+            }
+            _ => None,
+        }
     });
-    let retained = entry_id.is_none()
-        || (!after.iter().any(|entry| entry.compaction().is_some()) && latest_edit.is_none_or(Option::is_some));
+    let retained =
+        entry_id.is_none() || (!after.iter().any(|entry| entry.compaction().is_some()) && latest_edit.unwrap_or(true));
     let explicit_overflow = assistant.stop_reason == StopReason::Error && is_context_overflow(assistant, None);
     let context_overflow = same_model
         && ((explicit_overflow && retained)
@@ -135,7 +139,12 @@ pub fn check_compaction(session: &SessionManager, input: CompactionCheckInput) -
 
 /// The id of the newest entry on the branch that stores `message`.
 pub fn find_message_entry_id(session: &SessionManager, message: &Message) -> Option<String> {
-    session.get_branch(None).iter().rev().find(|entry| entry.message() == Some(message)).map(|e| e.id().to_string())
+    session
+        .get_branch(None)
+        .iter()
+        .rev()
+        .find(|entry| entry.message().as_deref() == Some(message))
+        .map(|e| e.id().to_string())
 }
 
 /// The ids of the entries after `assistant_entry_id`, and before the next assistant message,
@@ -150,9 +159,9 @@ pub fn find_tool_result_entry_ids(
     let calls: Vec<&str> = assistant.tool_calls().map(|call| call.id.as_str()).collect();
     branch[index + 1..]
         .iter()
-        .take_while(|entry| !matches!(entry.message(), Some(Message::Assistant(_))))
+        .take_while(|entry| !entry.is_message_role("assistant"))
         .filter(|entry| {
-            matches!(entry.message(), Some(Message::ToolResult(result)) if calls.contains(&result.tool_call_id.as_str()))
+            matches!(entry.message().as_deref(), Some(Message::ToolResult(result)) if calls.contains(&result.tool_call_id.as_str()))
         })
         .map(|entry| entry.id().to_string())
         .collect()

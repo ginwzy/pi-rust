@@ -77,8 +77,11 @@ pub fn assistant_usage(message: &Message) -> Option<&Usage> {
 }
 
 /// The last valid assistant usage among `entries`.
-pub fn last_assistant_usage<'a>(entries: impl DoubleEndedIterator<Item = &'a Entry>) -> Option<&'a Usage> {
-    entries.rev().find_map(|entry| entry.message().and_then(assistant_usage))
+pub fn last_assistant_usage<'a>(entries: impl DoubleEndedIterator<Item = &'a Entry>) -> Option<Usage> {
+    entries
+        .rev()
+        .filter(|entry| entry.is_message_role("assistant"))
+        .find_map(|entry| assistant_usage(entry.message().as_deref()?).copied())
 }
 
 const ESTIMATED_IMAGE_CHARS: usize = 4800;

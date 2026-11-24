@@ -65,7 +65,7 @@ async fn runtime_with(source: &str, provider: Arc<FauxProvider>, mode: Extension
 }
 
 fn entry_json(entry: &pi_coding_agent::session::entry::Entry) -> serde_json::Value {
-    serde_json::Value::Object(entry.raw().clone())
+    entry.to_value()
 }
 
 const LIFECYCLE: &str = r#"export default function (pi) {

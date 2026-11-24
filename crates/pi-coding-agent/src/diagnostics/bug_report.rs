@@ -223,7 +223,8 @@ pub fn collect_bug_report_diagnostics(session_id: &str, entries: &[Entry], crash
     let mut assistant_count = 0;
     let mut assistant = Vec::new();
     for entry in entries {
-        let Some(Message::Assistant(message)) = entry.message() else { continue };
+        let decoded = entry.message();
+        let Some(Message::Assistant(message)) = decoded.as_deref() else { continue };
         assistant_count += 1;
         assistant.extend(failed_turn(entry, message));
     }

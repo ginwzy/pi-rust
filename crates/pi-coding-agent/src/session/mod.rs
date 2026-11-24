@@ -34,7 +34,7 @@ pub use self::entry::{
 use self::ids::resolve_path;
 pub use self::ids::{assert_valid_session_id, format_iso, iso_timestamp, parse_iso, uuid_v7};
 pub use self::listing::{ResolvedSession, SessionInfo, list_sessions};
-use self::storage::{append_line, header_from_raw, write_lines};
+use self::storage::{Loaded, StoredHeader, append_line, header_from_raw, load_history, write_lines};
 pub use self::storage::{
     find_most_recent_session, load_entries_from_file, migrate_session_entries, parse_session_entries,
     read_session_header,
@@ -61,7 +61,7 @@ pub struct SessionManager {
     cwd: PathBuf,
     persist: bool,
     flushed: bool,
-    header: FileEntry,
+    header: StoredHeader,
     entries: Vec<Entry>,
     by_id: HashMap<String, usize>,
     /// Target id to `(label, timestamp of the label change)`.
@@ -89,7 +89,7 @@ impl SessionManager {
             cwd: resolve_path(cwd),
             persist,
             flushed: false,
-            header: FileEntry::new(),
+            header: StoredHeader::Native(SessionHeader::default()),
             entries: Vec::new(),
             by_id: HashMap::new(),
             labels: HashMap::new(),
@@ -167,7 +167,7 @@ impl SessionManager {
         manager.session_id = header.id;
         manager.session_file = Some(path);
         manager.flushed = true;
-        manager.header = raw;
+        manager.header = StoredHeader::from_raw(raw);
         manager.entries = entries;
         manager.build_index();
         Ok(manager)
@@ -229,8 +229,8 @@ impl SessionManager {
             self.session_file = Some(path);
             return Ok(());
         }
-        let entries = preloaded.unwrap_or_else(|| load_entries_from_file(&path));
-        if entries.is_empty() {
+        let loaded = preloaded.map(Loaded::Legacy).or_else(|| load_history(&path));
+        let Some(loaded) = loaded else {
             if std::fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0) > 0 {
                 anyhow::bail!("Session file is not a valid pi session: {}", path.display());
             }
@@ -239,9 +239,17 @@ impl SessionManager {
             self.rewrite_file()?;
             self.flushed = true;
             return Ok(());
-        }
+        };
         self.session_file = Some(path);
-        self.load_entries(entries, NewSessionOptions::default())?;
+        match loaded {
+            Loaded::Current(header, entries) => {
+                self.session_id = header.header().id;
+                self.header = header;
+                self.entries = entries;
+                self.build_index();
+            }
+            Loaded::Legacy(entries) => self.load_entries(entries, NewSessionOptions::default())?,
+        }
         self.flushed = true;
         Ok(())
     }
@@ -261,10 +269,7 @@ impl SessionManager {
             cwd: self.cwd.display().to_string(),
             parent_session: options.parent_session,
         };
-        self.header = match serde_json::to_value(&header)? {
-            Value::Object(object) => object,
-            _ => FileEntry::new(),
-        };
+        self.header = StoredHeader::Native(header);
         self.entries.clear();
         self.by_id.clear();
         self.labels.clear();
@@ -290,7 +295,7 @@ impl SessionManager {
         let migrated = migrate_session_entries(&mut file_entries);
         let header = file_entries.remove(header_index);
         self.session_id = header.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
-        self.header = header;
+        self.header = StoredHeader::from_raw(header);
         self.entries = file_entries
             .into_iter()
             .filter(|entry| entry.get("type").and_then(Value::as_str) != Some("session"))
@@ -317,7 +322,9 @@ impl SessionManager {
     fn rebuild_labels(&mut self) {
         self.labels.clear();
         for entry in &self.entries {
-            if let EntryData::Label { target_id, label } = entry.data() {
+            if entry.kind() == "label"
+                && let EntryData::Label { target_id, label } = entry.data().as_ref()
+            {
                 match label.as_deref().filter(|label| !label.is_empty()) {
                     Some(label) => {
                         self.labels.insert(target_id.clone(), (label.to_string(), entry.timestamp().to_string()));
@@ -446,12 +453,12 @@ impl SessionManager {
 
     /// The typed header.
     pub fn header(&self) -> SessionHeader {
-        header_from_raw(&self.header).unwrap_or_default()
+        self.header.header()
     }
 
     /// The header line as stored.
-    pub fn header_raw(&self) -> &FileEntry {
-        &self.header
+    pub fn header_value(&self) -> FileEntry {
+        serde_json::from_value(serde_json::to_value(&self.header).expect("serialize header")).expect("header object")
     }
 
     /// All entries in file order, without the header.
@@ -533,7 +540,8 @@ impl SessionManager {
         self.entries
             .iter()
             .rev()
-            .find_map(|entry| match entry.data() {
+            .filter(|entry| entry.kind() == "session_info")
+            .find_map(|entry| match entry.data().as_ref() {
                 EntryData::SessionInfo { name } => Some(name.as_deref().map(str::trim).unwrap_or_default().to_string()),
                 _ => None,
             })

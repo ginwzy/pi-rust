@@ -38,18 +38,18 @@ pub use pi_agent::combine_usage;
 
 /// Usage an entry adds to session totals, with its breakdown key: assistant messages and
 /// `usage` entries by `provider/model`, tool results and summaries under `Tools/summaries`.
-pub fn entry_usage(entry: &Entry) -> Option<(String, &Usage)> {
-    match entry.data() {
+pub fn entry_usage(entry: &Entry) -> Option<(String, Usage)> {
+    match entry.data().as_ref() {
         EntryData::Message(Message::Assistant(assistant)) => {
             let model = assistant.response_model.as_deref().unwrap_or(&assistant.model);
-            Some((format!("{}/{model}", assistant.provider), &assistant.usage))
+            Some((format!("{}/{model}", assistant.provider), assistant.usage))
         }
-        EntryData::Usage(usage) => Some((format!("{}/{}", usage.provider, usage.model), &usage.usage)),
+        EntryData::Usage(usage) => Some((format!("{}/{}", usage.provider, usage.model), usage.usage)),
         EntryData::Message(Message::ToolResult(result)) => {
-            result.usage.as_ref().map(|usage| ("Tools/summaries".to_string(), usage))
+            result.usage.map(|usage| ("Tools/summaries".to_string(), usage))
         }
-        EntryData::Compaction(compaction) => compaction.usage.as_ref().map(|usage| ("Tools/summaries".into(), usage)),
-        EntryData::BranchSummary(summary) => summary.usage.as_ref().map(|usage| ("Tools/summaries".into(), usage)),
+        EntryData::Compaction(compaction) => compaction.usage.map(|usage| ("Tools/summaries".into(), usage)),
+        EntryData::BranchSummary(summary) => summary.usage.map(|usage| ("Tools/summaries".into(), usage)),
         _ => None,
     }
 }
@@ -59,7 +59,7 @@ pub fn usage_totals<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> UsageTo
     let mut totals = UsageTotals::default();
     for entry in entries {
         if let Some((_, usage)) = entry_usage(entry) {
-            totals.add(usage);
+            totals.add(&usage);
         }
     }
     totals
@@ -81,7 +81,7 @@ pub fn usage_cost_breakdown<'a>(entries: impl IntoIterator<Item = &'a Entry>) ->
         if !totals.contains_key(&key) {
             order.push(key.clone());
         }
-        totals.entry(key).or_default().add(usage);
+        totals.entry(key).or_default().add(&usage);
     }
     let mut breakdown: Vec<UsageCostBreakdownEntry> = order
         .into_iter()
@@ -119,7 +119,7 @@ impl SessionManager {
         for entry in self.entries() {
             if let Some(message) = entry.message() {
                 stats.total_messages += 1;
-                match message {
+                match message.as_ref() {
                     Message::User(_) => stats.user_messages += 1,
                     Message::ToolResult(_) => stats.tool_results += 1,
                     Message::Assistant(assistant) => {

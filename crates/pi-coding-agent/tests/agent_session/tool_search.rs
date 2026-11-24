@@ -55,9 +55,9 @@ async fn activates_tool_search_for_deferred_mcp_tools_and_keeps_loads_on_the_bra
     let (first_user, last) = {
         let manager = session.session_manager();
         let branch = manager.get_branch(None);
-        let user = branch
-            .iter()
-            .find(|entry| matches!(entry.data(), pi_coding_agent::session::EntryData::Message(Message::User(_))));
+        let user = branch.iter().find(|entry| {
+            matches!(entry.data().as_ref(), pi_coding_agent::session::EntryData::Message(Message::User(_)))
+        });
         (user.unwrap().id().to_string(), branch.last().unwrap().id().to_string())
     };
     session.navigate_tree(&first_user, NavigateTreeOptions::default()).await.unwrap();

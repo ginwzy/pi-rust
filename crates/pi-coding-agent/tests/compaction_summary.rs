@@ -162,7 +162,7 @@ async fn rejects_truncated_or_tool_calling_summaries() {
     );
     let error = compact(&mut session, plan, &model, None, None, &settings, CancellationToken::new()).await;
     assert_eq!(error.unwrap_err().to_string(), "Summarization attempted to call a tool");
-    assert!(!session.entries().iter().any(|entry| matches!(entry.data(), EntryData::Compaction(_))));
+    assert!(!session.entries().iter().any(|entry| matches!(entry.data().as_ref(), EntryData::Compaction(_))));
 }
 
 #[tokio::test]

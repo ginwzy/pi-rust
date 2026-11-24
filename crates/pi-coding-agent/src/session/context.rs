@@ -10,7 +10,7 @@ use pi_ai::{ContentBlock, Message, SystemMessage, ThinkingLevel, UserContent};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::entry::{ContextReplacement, Entry, EntryData};
+use super::entry::{ContextReplacement, Entry, EntryData, StoredEntry};
 use crate::messages::{create_branch_summary_message, create_compaction_summary_message, create_custom_message};
 
 /// Which entry a path ends at.
@@ -112,7 +112,8 @@ pub fn build_context_entries<'a>(entries: &'a [Entry], leaf: Leaf<'_>) -> Vec<&'
 pub(crate) fn context_entries_of_path(path: Vec<&Entry>) -> Vec<&Entry> {
     let Some(compaction_index) = path.iter().rposition(|entry| entry.compaction().is_some()) else { return path };
     let compaction = path[compaction_index];
-    let first_kept = compaction.compaction().map(|data| data.first_kept_entry_id.as_str()).unwrap_or_default();
+    let kept = compaction.compaction();
+    let first_kept = kept.as_ref().map(|data| data.first_kept_entry_id.as_str()).unwrap_or_default();
     let mut selected = vec![compaction];
     let mut found = false;
     for entry in &path[..compaction_index] {
@@ -133,7 +134,10 @@ pub fn session_entry_to_context_messages(entry: &Entry) -> Vec<Message> {
 }
 
 fn visit_messages(entry: &Entry, mut emit: impl FnMut(Message)) {
-    match entry.data() {
+    if !matches!(entry.kind(), "message" | "custom_message" | "branch_summary" | "compaction") {
+        return;
+    }
+    match entry.data().as_ref() {
         EntryData::Message(message) => emit(message.clone()),
         EntryData::CustomMessage(custom) => emit(create_custom_message(
             &custom.custom_type,
@@ -189,7 +193,6 @@ struct Source<'a> {
     entry: &'a Entry,
     edit: Option<&'a Entry>,
     omitted: bool,
-    replacement: Option<&'a ContextReplacement>,
 }
 
 impl Source<'_> {
@@ -197,8 +200,13 @@ impl Source<'_> {
         if self.omitted {
             return;
         }
+        let edit = self.edit.map(Entry::data);
+        let replacement = match edit.as_deref() {
+            Some(EntryData::ContextEdit { replacement, .. }) => replacement.as_ref(),
+            _ => None,
+        };
         visit_messages(self.entry, |message| {
-            messages.push(match self.replacement {
+            messages.push(match replacement {
                 Some(replacement) => replace_content(message, replacement),
                 None => message,
             });
@@ -210,9 +218,10 @@ fn context_sources(path: Vec<&Entry>) -> impl Iterator<Item = Source<'_>> {
     let selected = context_entries_of_path(path);
     let edits: HashMap<_, _> = selected
         .iter()
-        .filter_map(|entry| match entry.data() {
+        .filter(|entry| entry.kind() == "context_edit")
+        .filter_map(|entry| match entry.data().as_ref() {
             EntryData::ContextEdit { target_id, replacement } => {
-                Some((target_id.as_str(), (*entry, replacement.as_ref())))
+                Some((target_id.clone(), (*entry, replacement.is_none())))
             }
             _ => None,
         })
@@ -222,8 +231,7 @@ fn context_sources(path: Vec<&Entry>) -> impl Iterator<Item = Source<'_>> {
         Source {
             entry,
             edit: edit.map(|(edit, _)| edit),
-            omitted: matches!(edit, Some((_, None))) || (index > 0 && entry.compaction().is_some()),
-            replacement: edit.and_then(|(_, replacement)| replacement),
+            omitted: matches!(edit, Some((_, true))) || (index > 0 && entry.compaction().is_some()),
         }
     })
 }
@@ -231,46 +239,64 @@ fn context_sources(path: Vec<&Entry>) -> impl Iterator<Item = Source<'_>> {
 pub(crate) fn has_context_messages(path: Vec<&Entry>) -> bool {
     context_sources(path).any(|source| {
         !source.omitted
-            && match source.entry.data() {
-                EntryData::Message(_) | EntryData::CustomMessage(_) | EntryData::Compaction(_) => true,
-                EntryData::BranchSummary(summary) => !summary.summary.is_empty(),
+            && match source.entry.kind() {
+                "message" => source.entry.message_role().is_some(),
+                "custom_message" => matches!(source.entry.data().as_ref(), EntryData::CustomMessage(_)),
+                "compaction" => source.entry.compaction().is_some(),
+                "branch_summary" => source.entry.branch_summary().is_some_and(|summary| !summary.summary.is_empty()),
                 _ => false,
             }
     })
 }
 
 pub(crate) fn current_system_message(path: Vec<&Entry>) -> Option<SystemMessage> {
-    replay_system_messages(context_sources(path).filter(|source| !source.omitted).filter_map(|source| {
-        match source.entry.data() {
-            EntryData::Message(Message::System(system)) => Some(system.as_ref()),
-            EntryData::Compaction(compaction) => compaction.system_message.as_ref(),
-            _ => None,
-        }
-    }))
+    let systems: Vec<_> = context_sources(path)
+        .filter(|source| !source.omitted)
+        .filter_map(|source| {
+            if source.entry.is_message_role("system") {
+                if let Some(Message::System(system)) = source.entry.message().as_deref() {
+                    return Some(system.clone());
+                }
+            }
+            source.entry.compaction().and_then(|data| data.system_message.clone()).map(Arc::new)
+        })
+        .collect();
+    replay_system_messages(systems.iter().map(Arc::as_ref))
 }
 
 /// Model and thinking level from the whole path, as upstream `getSessionContextSettings`.
 pub fn context_settings(path: &[&Entry]) -> (Option<(String, String)>, Option<ThinkingLevel>) {
     let (mut model, mut thinking_level) = (None, None);
-    for entry in path {
-        update_settings(entry, &mut model, &mut thinking_level);
+    for entry in path.iter().rev() {
+        if model.is_none() {
+            model = entry_model(entry);
+        }
+        if thinking_level.is_none() {
+            thinking_level = entry_thinking_level(entry);
+        }
+        if model.is_some() && thinking_level.is_some() {
+            break;
+        }
     }
-    (model.map(|(provider, model)| (provider.clone(), model.clone())), thinking_level)
+    (model, thinking_level)
 }
 
-fn update_settings<'a>(
-    entry: &'a Entry,
-    model: &mut Option<(&'a String, &'a String)>,
-    thinking_level: &mut Option<ThinkingLevel>,
-) {
-    match entry.data() {
-        EntryData::ThinkingLevelChange { thinking_level: level } => {
-            *thinking_level = level.parse::<ThinkingLevel>().ok().or(*thinking_level);
+fn entry_model(entry: &Entry) -> Option<(String, String)> {
+    if entry.kind() == "model_change" {
+        if let EntryData::ModelChange { provider, model_id } = entry.data().as_ref() {
+            return Some((provider.clone(), model_id.clone()));
         }
-        EntryData::ModelChange { provider, model_id } => *model = Some((provider, model_id)),
-        EntryData::Message(Message::Assistant(assistant)) => *model = Some((&assistant.provider, &assistant.model)),
-        _ => {}
     }
+    entry.assistant_model()
+}
+
+fn entry_thinking_level(entry: &Entry) -> Option<ThinkingLevel> {
+    if entry.kind() == "thinking_level_change"
+        && let EntryData::ThinkingLevelChange { thinking_level } = entry.data().as_ref()
+    {
+        return thinking_level.parse().ok();
+    }
+    None
 }
 
 #[derive(Debug, Default)]
@@ -285,8 +311,8 @@ impl Clone for ProjectionCache {
 #[derive(Debug)]
 struct ProjectedSpan {
     index: usize,
-    source: Weak<Value>,
-    edit: Option<Weak<Value>>,
+    source: Weak<StoredEntry>,
+    edit: Option<Weak<StoredEntry>>,
     omitted: bool,
     range: Range<usize>,
 }
@@ -317,7 +343,9 @@ impl CachedProjection {
         };
         let reuse = previous.map(Self::by_source).unwrap_or_default();
         for source in context_sources(path) {
-            if let EntryData::ContextEdit { target_id, .. } = source.entry.data() {
+            if source.entry.kind() == "context_edit"
+                && let EntryData::ContextEdit { target_id, .. } = source.entry.data().as_ref()
+            {
                 cached.edit_targets.insert(target_id.clone());
             }
             let start = cached.context.messages.len();
@@ -328,8 +356,8 @@ impl CachedProjection {
             }
             cached.spans.push(ProjectedSpan {
                 index: index[source.entry.id()],
-                source: Arc::downgrade(&source.entry.shared_raw()),
-                edit: source.edit.map(|edit| Arc::downgrade(&edit.shared_raw())),
+                source: Arc::downgrade(&source.entry.0),
+                edit: source.edit.map(|edit| Arc::downgrade(&edit.0)),
                 omitted: source.omitted,
                 range: start..cached.context.messages.len(),
             });
@@ -349,16 +377,15 @@ impl CachedProjection {
         visit_messages(entry, |message| self.context.messages.push(message));
         self.spans.push(ProjectedSpan {
             index,
-            source: Arc::downgrade(&entry.shared_raw()),
+            source: Arc::downgrade(&entry.0),
             edit: None,
             omitted: false,
             range: start..self.context.messages.len(),
         });
-        let mut model = None;
-        update_settings(entry, &mut model, &mut self.context.thinking_level);
-        if let Some((provider, model)) = model {
-            self.context.model = Some((provider.clone(), model.clone()));
+        if let Some(model) = entry_model(entry) {
+            self.context.model = Some(model);
         }
+        self.context.thinking_level = entry_thinking_level(entry).or(self.context.thinking_level);
         self.leaf = Some(entry.id().into());
         self.revision = revision;
     }
@@ -387,13 +414,13 @@ impl CachedProjection {
         })
     }
 
-    fn by_source(&self) -> HashMap<*const Value, &ProjectedSpan> {
+    fn by_source(&self) -> HashMap<*const StoredEntry, &ProjectedSpan> {
         self.spans.iter().map(|span| (span.source.as_ptr(), span)).collect()
     }
 
-    fn reusable(&self, reuse: &HashMap<*const Value, &ProjectedSpan>, source: &Source<'_>) -> Option<&[Message]> {
-        let span = reuse.get(&Arc::as_ptr(&source.entry.shared_raw()))?;
-        let edit = source.edit.map(|edit| Arc::as_ptr(&edit.shared_raw()));
+    fn reusable(&self, reuse: &HashMap<*const StoredEntry, &ProjectedSpan>, source: &Source<'_>) -> Option<&[Message]> {
+        let span = reuse.get(&Arc::as_ptr(&source.entry.0))?;
+        let edit = source.edit.map(|edit| Arc::as_ptr(&edit.0));
         (span.omitted == source.omitted && span.edit.as_ref().map(Weak::as_ptr) == edit)
             .then(|| &self.context.messages[span.range.clone()])
     }

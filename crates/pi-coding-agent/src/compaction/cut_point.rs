@@ -99,7 +99,7 @@ fn is_omitted(entry: &ProjectedEntry) -> bool {
 fn is_recovery_omission_suffix(suffix: &[ProjectedEntry]) -> bool {
     let omitted_ids: Vec<&str> =
         suffix.iter().filter(|entry| is_omitted(entry)).map(|entry| entry.source.id()).collect();
-    let external_replacement = suffix.iter().any(|entry| match entry.source.data() {
+    let external_replacement = suffix.iter().any(|entry| match entry.source.data().as_ref() {
         EntryData::ContextEdit { target_id, replacement } => {
             replacement.is_some() && !omitted_ids.contains(&target_id.as_str())
         }

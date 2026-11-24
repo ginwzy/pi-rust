@@ -312,7 +312,7 @@ impl AgentSession {
     }
 
     pub(crate) fn emit_entry(&self, entry_id: &str) {
-        let entry = self.session_manager().get_entry(entry_id).map(crate::session::Entry::shared_raw);
+        let entry = self.session_manager().get_entry(entry_id).cloned();
         if let Some(entry) = entry {
             self.emit(&AgentSessionEvent::EntryAppended { entry });
         }

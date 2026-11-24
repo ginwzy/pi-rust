@@ -110,18 +110,19 @@ pub(super) fn has_text_content(content: Option<&Value>) -> bool {
     }
 }
 
-fn message(node: &TreeNode) -> Option<&Map<String, Value>> {
-    node.entry.raw().get("message").and_then(Value::as_object)
+fn message(raw: &Map<String, Value>) -> Option<&Map<String, Value>> {
+    raw.get("message").and_then(Value::as_object)
 }
 
 /// Text that search matches against: label, type words, and content.
 pub(super) fn searchable_text(node: &TreeNode) -> String {
-    let raw = node.entry.raw();
+    let stored = node.entry.to_raw_map();
+    let raw = &stored;
     let mut parts: Vec<String> = node.label.iter().filter(|label| !label.is_empty()).cloned().collect();
     match node.entry.kind() {
         "message" => {
             let empty = Map::new();
-            let msg = message(node).unwrap_or(&empty);
+            let msg = message(raw).unwrap_or(&empty);
             parts.push(join_part(msg.get("role")));
             if truthy(msg.get("content")) {
                 parts.push(extract_content(msg.get("content")));
@@ -163,9 +164,9 @@ fn context_edit_kind(raw: &Map<String, Value>) -> &'static str {
 
 /// Full text copied for an entry, or `None` when it has no text.
 pub(super) fn entry_copy_text(node: &TreeNode) -> Option<String> {
-    let raw = node.entry.raw();
+    let raw = node.entry.to_raw_map();
     let text = match node.entry.kind() {
-        "message" => message(node).and_then(|msg| {
+        "message" => message(&raw).and_then(|msg| {
             if str_field(msg, "role") == "bashExecution" {
                 msg.get("command").and_then(Value::as_str).map(String::from)
             } else if msg.contains_key("content") {
@@ -193,12 +194,13 @@ pub(super) fn entry_display_text(
     is_selected: bool,
 ) -> String {
     let theme = theme();
-    let raw = node.entry.raw();
+    let stored = node.entry.to_raw_map();
+    let raw = &stored;
     let dim = |text: &str| theme.fg(ThemeColor::Dim, text);
     let result = match node.entry.kind() {
         "message" => {
             let empty = Map::new();
-            let msg = message(node).unwrap_or(&empty);
+            let msg = message(raw).unwrap_or(&empty);
             match str_field(msg, "role") {
                 "user" => {
                     let content = normalize(&extract_content(msg.get("content")));

@@ -61,7 +61,7 @@ pub enum UiEvent {
         will_retry: bool,
         error_message: Option<String>,
     },
-    EntryAppended(Arc<Value>),
+    EntryAppended(crate::session::Entry),
     SessionInfoChanged,
     ThinkingLevelChanged,
     AutoRetryStart {

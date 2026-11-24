@@ -192,7 +192,7 @@ impl AgentSession {
             let (new_leaf, summary_entry) = {
                 let session = self.session_manager();
                 let entry = result.summary_entry_id.as_deref().and_then(|id| session.get_entry(id));
-                (session.leaf_id().map(String::from), entry.map(|entry| Value::Object(entry.raw().clone())))
+                (session.leaf_id().map(String::from), entry.map(|entry| entry.to_value()))
             };
             let mut event = json!({"type": "session_tree", "newLeafId": new_leaf, "oldLeafId": old_leaf});
             if let Some(entry) = summary_entry {
@@ -224,7 +224,7 @@ impl AgentSession {
             "targetId": target_id,
             "oldLeafId": old_leaf,
             "commonAncestorId": common_ancestor,
-            "entriesToSummarize": entries.iter().map(|entry| Value::Object(entry.raw().clone())).collect::<Vec<_>>(),
+            "entriesToSummarize": entries.iter().map(|entry| entry.to_value()).collect::<Vec<_>>(),
             "userWantsSummary": options.summarize,
             "customInstructions": options.custom_instructions,
             "replaceInstructions": options.replace_instructions,
@@ -298,7 +298,7 @@ impl AgentSession {
         let (new_leaf, editor_text) = if exact {
             (target_id.map(String::from), None)
         } else {
-            match target.as_ref().expect("legacy navigation has a target").data() {
+            match target.as_ref().expect("legacy navigation has a target").data().as_ref() {
                 EntryData::Message(Message::User(user)) => {
                     (target.as_ref().unwrap().parent_id().map(String::from), Some(user_content_text(&user.content, "")))
                 }
@@ -348,7 +348,7 @@ impl AgentSession {
         session
             .entries()
             .iter()
-            .filter_map(|entry| match entry.data() {
+            .filter_map(|entry| match entry.data().as_ref() {
                 EntryData::Message(Message::User(user)) => {
                     let text = user_content_text(&user.content, "");
                     (!text.is_empty()).then(|| (entry.id().to_string(), text))
@@ -377,11 +377,7 @@ impl AgentSession {
     pub fn set_session_name_if_unchanged(&self, name: &str, expected: Option<&str>) -> anyhow::Result<bool> {
         let name = {
             let mut session = self.session_manager();
-            let current = session
-                .entries()
-                .iter()
-                .rev()
-                .find(|entry| entry.raw().get("type").and_then(serde_json::Value::as_str) == Some("session_info"));
+            let current = session.entries().iter().rev().find(|entry| entry.kind() == "session_info");
             if current.map(|entry| entry.id()) != expected {
                 return Ok(false);
             }

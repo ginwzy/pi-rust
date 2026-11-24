@@ -160,7 +160,8 @@ impl TreeList {
         if kind == "usage" {
             return false;
         }
-        let message = entry.raw().get("message");
+        let raw = entry.to_raw_map();
+        let message = raw.get("message");
         let role = message.and_then(|message| message.get("role")).and_then(Value::as_str);
         let is_message = |wanted: &str| kind == "message" && role == Some(wanted);
         // Assistant messages with only tool calls are hidden unless they failed or are the leaf.

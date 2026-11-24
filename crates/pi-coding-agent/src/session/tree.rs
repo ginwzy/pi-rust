@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::entry::{Entry, EntryData, SessionHeader};
 use super::ids::{generate_entry_id, iso_timestamp, parse_iso, uuid_v7};
@@ -117,7 +117,7 @@ impl SessionManager {
                 label_replacement.insert(label_id, entry.id().to_string());
             }
             let mut copy = entry.with_parent(parent.as_deref());
-            if let EntryData::Compaction(compaction) = entry.data()
+            if let Some(compaction) = entry.compaction()
                 && compaction.first_kept_entry_id != entry.id()
                 && let Some(replacement) = label_replacement.get(&compaction.first_kept_entry_id)
             {
@@ -148,21 +148,17 @@ impl SessionManager {
         for (target, label, stamp) in labels {
             let id = generate_entry_id(|candidate| used.contains(candidate));
             used.insert(id.clone());
-            kept.push(Entry::build(vec![
-                ("type", Some(json!("label"))),
-                ("id", Some(json!(id))),
-                ("parentId", Some(parent.clone().map_or(Value::Null, Value::String))),
-                ("timestamp", Some(json!(stamp))),
-                ("targetId", Some(json!(target))),
-                ("label", Some(json!(label))),
-            ]));
+            kept.push(Entry::native(
+                "label",
+                id.clone(),
+                parent.as_deref(),
+                stamp,
+                EntryData::Label { target_id: target, label: Some(label) },
+            ));
             parent = Some(id);
         }
 
-        self.header = match serde_json::to_value(&header)? {
-            Value::Object(object) => object,
-            _ => Default::default(),
-        };
+        self.header = super::storage::StoredHeader::Native(header);
         self.entries = kept;
         self.session_id = new_id.clone();
         self.build_index();

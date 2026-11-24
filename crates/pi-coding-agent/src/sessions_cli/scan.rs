@@ -45,16 +45,16 @@ pub fn session_cost(path: &Path) -> f64 {
 
 fn event(entry: &Entry) -> Option<SessionEvent> {
     let message = entry.message();
-    let prompt = matches!(message, Some(Message::User(_)));
-    let assistant = matches!(message, Some(Message::Assistant(_)));
+    let prompt = matches!(message.as_deref(), Some(Message::User(_)));
+    let assistant = matches!(message.as_deref(), Some(Message::Assistant(_)));
     let usage = entry_usage(entry).map(|(model, usage)| {
-        let provider = match entry.data() {
+        let provider = match entry.data().as_ref() {
             EntryData::Message(Message::Assistant(assistant)) => assistant.provider.clone(),
             EntryData::Usage(usage) => usage.provider.clone(),
             _ => model.clone(),
         };
         let mut totals = UsageTotals::default();
-        totals.add(usage);
+        totals.add(&usage);
         EventUsage { model, provider, totals }
     });
     if !prompt && !assistant && usage.is_none() {
@@ -65,7 +65,8 @@ fn event(entry: &Entry) -> Option<SessionEvent> {
 
 /// The message time of a message entry, else the entry timestamp.
 fn entry_time(entry: &Entry) -> Option<i64> {
-    let message = entry.raw().get("message").and_then(|message| message.get("timestamp"));
+    let raw = entry.to_raw_map();
+    let message = raw.get("message").and_then(|message| message.get("timestamp"));
     let message_time = message.and_then(Value::as_f64).map(|time| time as i64).filter(|time| *time > 0);
     message_time.or_else(|| parse_iso(entry.timestamp()))
 }

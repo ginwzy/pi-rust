@@ -219,7 +219,7 @@ fn preloaded_entries_migrate_only_with_an_old_header() {
         vec![hook.as_object().unwrap().clone()],
     )
     .unwrap();
-    assert_eq!(headerless.entries()[0].raw()["message"]["role"], "hookMessage");
+    assert_eq!(headerless.entries()[0].to_value()["message"]["role"], "hookMessage");
 }
 
 fn tool_result(text: &str) -> Message {
@@ -242,7 +242,7 @@ fn context_edits_omit_and_replace_only_in_the_projection() {
     session.append_context_edit(&result_id, None).unwrap();
     assert_eq!(session.get_branch(None).iter().filter(|entry| entry.kind() == "message").count(), 3);
     assert_eq!(roles(&session.build_session_projection().messages), ["user"]);
-    assert_eq!(text(session.get_entry(&result_id).unwrap().message().unwrap()), "raw output");
+    assert_eq!(text(&session.get_entry(&result_id).unwrap().message().unwrap()), "raw output");
 
     let mut session = memory();
     let target = session.append_message(&assistant("original")).unwrap();
@@ -252,7 +252,7 @@ fn context_edits_omit_and_replace_only_in_the_projection() {
     let projected = &session.build_session_projection().messages[0];
     assert_eq!(text(projected), "restored");
     assert!(matches!(projected, Message::Assistant(message) if message.usage.total_tokens == 2));
-    assert_eq!(text(session.get_entry(&target).unwrap().message().unwrap()), "original");
+    assert_eq!(text(&session.get_entry(&target).unwrap().message().unwrap()), "original");
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn context_edits_normalize_strings_and_stay_branch_relative() {
     let result_id = session.append_message(&tool_result("original result")).unwrap();
     let edit = session.append_context_edit(&assistant_id, Some(json!("assistant replacement"))).unwrap();
     session.append_context_edit(&result_id, Some(json!("result replacement"))).unwrap();
-    let stored = &session.get_entry(&edit).unwrap().raw()["replacement"];
+    let stored = &session.get_entry(&edit).unwrap().to_value()["replacement"];
     assert_eq!(stored, &json!({"content": [{"type": "text", "text": "assistant replacement"}]}));
     assert_eq!(texts(&session.build_session_projection().messages), ["assistant replacement", "result replacement"]);
     // A string replacement imported from elsewhere is normalized when projecting.

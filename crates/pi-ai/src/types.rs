@@ -463,6 +463,21 @@ impl<'de> Deserialize<'de> for Message {
 }
 
 impl Message {
+    pub fn from_json(text: &str) -> serde_json::Result<Self> {
+        #[derive(Deserialize)]
+        struct Envelope<'a> {
+            #[serde(borrow)]
+            role: std::borrow::Cow<'a, str>,
+        }
+        match KnownRole::of(&serde_json::from_str::<Envelope<'_>>(text)?.role) {
+            Some(known) => {
+                let mut deserializer = serde_json::Deserializer::from_str(text);
+                known.decode(&mut deserializer)
+            }
+            None => serde_json::from_str(text),
+        }
+    }
+
     /// Decode a borrowed JSON object without copying a temporary value tree.
     pub fn from_value(value: &Value) -> Result<Self, serde_json::Error> {
         let object = value.as_object().ok_or_else(|| serde_json::Error::custom("expected a message object"))?;

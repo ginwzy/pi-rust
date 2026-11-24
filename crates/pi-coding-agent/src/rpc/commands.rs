@@ -218,8 +218,7 @@ impl RpcServer {
                         None => return failed(id, "get_entries", &format!("Entry not found: {since}")),
                     },
                 };
-                let entries: Vec<Value> =
-                    entries[start..].iter().map(|entry| Value::Object(entry.raw().clone())).collect();
+                let entries: Vec<Value> = entries[start..].iter().map(|entry| entry.to_value()).collect();
                 ok(id, "get_entries", Some(json!({"entries": entries, "leafId": manager.leaf_id()})))
             }
             RpcCommand::GetTree => {

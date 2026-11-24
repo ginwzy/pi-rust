@@ -41,7 +41,7 @@ fn request_texts(ui: &Ui, index: usize) -> Vec<String> {
 fn prompt_entries(ui: &Ui, text: &str) -> Vec<(String, Option<String>)> {
     let session = ui.session();
     let manager = session.session_manager();
-    let entries = manager.entries().iter().filter(|entry| match entry.data() {
+    let entries = manager.entries().iter().filter(|entry| match entry.data().as_ref() {
         EntryData::Message(Message::User(user)) => user.content.text() == text,
         _ => false,
     });
@@ -68,7 +68,7 @@ async fn retry_runs_the_last_prompt_again_on_a_new_branch() {
         let manager = session.session_manager();
         let branch: Vec<&str> = manager.get_branch(None).iter().map(|entry| entry.id()).collect();
         assert!(branch.contains(&prompts[1].0.as_str()) && !branch.contains(&prompts[0].0.as_str()));
-        let old_answer = manager.entries().iter().any(|entry| match entry.data() {
+        let old_answer = manager.entries().iter().any(|entry| match entry.data().as_ref() {
             EntryData::Message(Message::Assistant(assistant)) => assistant.text() == "first answer",
             _ => false,
         });

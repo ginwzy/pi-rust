@@ -70,8 +70,8 @@ fn cut_points_land_on_user_or_assistant_messages() {
     let session = chain(&messages);
     let branch = session.get_branch(None);
     let result = find_cut_point(&branch, 0, branch.len(), 2500);
-    let role = branch[result.first_kept_entry_index].message().unwrap().role();
-    assert!(role == "user" || role == "assistant");
+    let role = branch[result.first_kept_entry_index].message_role();
+    assert!(matches!(role.as_deref(), Some("user" | "assistant")));
     let single = chain(&[assistant("a")]);
     assert_eq!(find_cut_point(&single.get_branch(None), 0, 1, 1000).first_kept_entry_index, 0);
     let small = chain(&[user("1"), assistant("a"), user("2"), assistant("b")]);

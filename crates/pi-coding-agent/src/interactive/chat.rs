@@ -267,11 +267,11 @@ impl InteractiveMode {
     pub(super) fn render_items_of(entries: &[Entry]) -> Vec<RenderItem> {
         let mut items = Vec::new();
         for entry in entries {
-            if let EntryData::Custom { .. } = entry.data() {
-                items.push(RenderItem::CustomEntry(serde_json::Value::Object(entry.raw().clone())));
+            if let EntryData::Custom { .. } = entry.data().as_ref() {
+                items.push(RenderItem::CustomEntry(entry.to_value()));
                 continue;
             }
-            if let EntryData::Usage(usage) = entry.data()
+            if let EntryData::Usage(usage) = entry.data().as_ref()
                 && usage.kind == "cache_warm"
             {
                 items.push(RenderItem::CacheWarm(usage.clone()));
@@ -283,7 +283,7 @@ impl InteractiveMode {
                 message: Box::new(message),
                 meta: Some(MessageMeta { id: entry.id().into(), timestamp: entry.timestamp().into() }),
             }));
-            let cost = match entry.data() {
+            let cost = match entry.data().as_ref() {
                 EntryData::Compaction(compaction) => compaction.usage.map(|usage| (true, usage)),
                 EntryData::BranchSummary(summary) => summary.usage.map(|usage| (false, usage)),
                 _ => None,

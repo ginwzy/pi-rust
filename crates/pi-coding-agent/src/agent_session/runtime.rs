@@ -344,7 +344,7 @@ impl AgentSessionRuntime {
         let (target_leaf, selected_text) = {
             let manager = current.session_manager();
             let entry = manager.get_entry(entry_id).ok_or_else(|| anyhow::anyhow!("Invalid entry ID for forking"))?;
-            match (position, entry.data()) {
+            match (position, entry.data().as_ref()) {
                 (ForkPosition::At, _) => (Some(entry.id().to_string()), None),
                 (ForkPosition::Before, EntryData::Message(pi_ai::Message::User(user))) => {
                     (entry.parent_id().map(String::from), Some(user_content_text(&user.content, "")))

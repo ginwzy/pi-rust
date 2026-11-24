@@ -96,7 +96,7 @@ async fn forks_clones_switches_and_starts_new_sessions() {
     assert_eq!(rpc.data(json!({"id": "s3", "type": "get_state"})).await["messageCount"], 0);
     let parent = original.as_str().unwrap();
     rpc.data(json!({"id": "new2", "type": "new_session", "parentSession": parent})).await;
-    let header = rpc.runtime.session().session_manager().header_raw().clone();
+    let header = rpc.runtime.session().session_manager().header_value();
     assert_eq!(header["parentSession"], parent);
 
     let switched = rpc.data(json!({"id": "sw", "type": "switch_session", "sessionPath": parent})).await;

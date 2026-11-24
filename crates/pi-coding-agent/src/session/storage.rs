@@ -5,9 +5,13 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde::{Serialize, Serializer};
+use serde_json::{
+    Value,
+    value::{RawValue, to_raw_value},
+};
 
-use super::entry::{CURRENT_SESSION_VERSION, Entry, FileEntry, SessionHeader};
+use super::entry::{CURRENT_SESSION_VERSION, Entry, FileEntry, SessionHeader, exact_match};
 use super::ids::{generate_entry_id, resolve_path};
 
 /// Header discovery reads at most this much before giving up on a file.
@@ -47,6 +51,94 @@ pub fn header_from_raw(raw: &FileEntry) -> Option<SessionHeader> {
         cwd: text("cwd").unwrap_or_default(),
         parent_session: text("parentSession"),
     })
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum StoredHeader {
+    Native(SessionHeader),
+    OrderedRaw(Box<RawValue>),
+}
+
+impl StoredHeader {
+    pub fn from_raw(raw: FileEntry) -> Self {
+        let compact = to_raw_value(&raw).expect("serialize session header");
+        if let Some(header) = header_from_raw(&raw)
+            && exact_match(compact.get().as_bytes(), &header)
+        {
+            return Self::Native(header);
+        }
+        Self::OrderedRaw(compact)
+    }
+
+    pub fn header(&self) -> SessionHeader {
+        match self {
+            Self::Native(header) => header.clone(),
+            Self::OrderedRaw(raw) => {
+                serde_json::from_str(raw.get()).ok().as_ref().and_then(header_from_raw).unwrap_or_default()
+            }
+        }
+    }
+}
+
+impl Serialize for StoredHeader {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Native(header) => header.serialize(serializer),
+            Self::OrderedRaw(raw) => raw.serialize(serializer),
+        }
+    }
+}
+
+pub(super) enum Loaded {
+    Current(StoredHeader, Vec<Entry>),
+    Legacy(Vec<FileEntry>),
+}
+
+pub(super) fn load_history(path: &Path) -> Option<Loaded> {
+    let mut reader = BufReader::new(File::open(path).ok()?);
+    let mut line = Vec::new();
+    let mut loaded = None;
+    let mut missing_newline = false;
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).ok()? == 0 {
+            break;
+        }
+        missing_newline = !line.ends_with(b"\n");
+        match &mut loaded {
+            Some(Loaded::Current(_, entries)) => {
+                let text = String::from_utf8_lossy(&line);
+                let text = text.strip_suffix('\n').unwrap_or(&text);
+                let text = text.strip_suffix('\r').unwrap_or(text);
+                if let Ok(entry) = Entry::from_json_line(text)
+                    && entry.kind() != "session"
+                {
+                    entries.push(entry);
+                }
+            }
+            Some(Loaded::Legacy(entries)) => entries.extend(parse_line(&line)),
+            None => {
+                let Some(raw) = parse_line(&line) else { continue };
+                if !is_header(&raw) {
+                    return None;
+                }
+                loaded = Some(
+                    if raw.get("version").and_then(Value::as_u64).unwrap_or(1) < u64::from(CURRENT_SESSION_VERSION) {
+                        Loaded::Legacy(vec![raw])
+                    } else {
+                        Loaded::Current(StoredHeader::from_raw(raw), Vec::new())
+                    },
+                );
+            }
+        }
+    }
+    if loaded.is_some()
+        && missing_newline
+        && let Ok(mut file) = OpenOptions::new().append(true).open(path)
+    {
+        let _ = file.write_all(b"\n");
+    }
+    loaded
 }
 
 /// All lines of a session file. Empty when the file is missing or its first parsed line is not

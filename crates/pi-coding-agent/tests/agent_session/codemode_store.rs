@@ -24,7 +24,7 @@ const INCREMENT: &str = "const next = (load(\"count\") ?? 0) + 1;\nstore(\"count
 fn store_entries(h: &Harness) -> Vec<Value> {
     let manager = h.session.session_manager();
     let branch = manager.get_branch(None);
-    let custom = branch.iter().map(|entry| Value::Object(entry.raw().clone()));
+    let custom = branch.iter().map(|entry| entry.to_value());
     custom.filter(|entry| entry["customType"] == "codemode-store").map(|entry| entry["data"].clone()).collect()
 }
 
@@ -60,7 +60,7 @@ async fn loads_the_values_written_on_the_current_branch() {
     let first_prompt = {
         let manager = h.session.session_manager();
         let branch = manager.get_branch(None);
-        branch.iter().find(|entry| entry.raw()["type"] == "message").unwrap().id().to_string()
+        branch.iter().find(|entry| entry.to_raw_map()["type"] == "message").unwrap().id().to_string()
     };
     assert_eq!(output(run(&h, INCREMENT).await.as_ref()), "2");
 
@@ -71,8 +71,7 @@ async fn loads_the_values_written_on_the_current_branch() {
     // Navigating back to the second write on the first path brings its value back.
     let second_write = {
         let manager = h.session.session_manager();
-        let writes =
-            manager.entries().iter().filter(|entry| entry.raw().get("customType") == Some(&json!("codemode-store")));
+        let writes = manager.entries().iter().filter(|entry| entry.to_value()["customType"] == "codemode-store");
         writes.map(|entry| entry.id().to_string()).nth(1).unwrap()
     };
     h.session.navigate_tree(&second_write, NavigateTreeOptions::default()).await.unwrap();

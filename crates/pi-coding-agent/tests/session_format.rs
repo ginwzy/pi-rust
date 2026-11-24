@@ -43,8 +43,12 @@ fn every_entry_type_round_trips_unchanged() {
     let mut session = SessionManager::open(&path).unwrap();
     assert_eq!(session.to_jsonl(), original);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), original, "opening a v3 file never rewrites it");
-    let typed: Vec<&str> =
-        session.entries().iter().filter(|entry| matches!(entry.data(), EntryData::Other)).map(|e| e.kind()).collect();
+    let typed: Vec<&str> = session
+        .entries()
+        .iter()
+        .filter(|entry| matches!(entry.data().as_ref(), EntryData::Other))
+        .map(|e| e.kind())
+        .collect();
     assert_eq!(typed, ["future_entry_type"]);
     assert_eq!(session.session_name().as_deref(), Some("Refactor auth module"));
     assert_eq!(session.get_label("d3e4f5a6"), Some("checkpoint-1"));

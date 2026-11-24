@@ -13,11 +13,7 @@ use super::convert::prompt_options_from_json;
 use super::ops::{Args, error};
 use super::runner::{ExtensionError, ExtensionRunner};
 use crate::agent_session::{AgentSession, lock};
-use crate::session::{Entry, FileEntry, SessionManager, SessionTree};
-
-fn raw(entry: &Entry) -> &FileEntry {
-    entry.raw()
-}
+use crate::session::{Entry, SessionManager, SessionTree};
 
 struct TreeNodes<'a> {
     tree: &'a SessionTree<'a>,
@@ -28,7 +24,7 @@ impl Serialize for TreeNodes<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         #[derive(Serialize)]
         struct Node<'a> {
-            entry: &'a FileEntry,
+            entry: &'a Entry,
             children: TreeNodes<'a>,
             #[serde(skip_serializing_if = "Option::is_none")]
             label: Option<&'a str>,
@@ -36,7 +32,7 @@ impl Serialize for TreeNodes<'_> {
         serializer.collect_seq(self.indices.iter().map(|index| {
             let node = self.tree.node(*index);
             Node {
-                entry: raw(node.entry),
+                entry: node.entry,
                 children: TreeNodes { tree: self.tree, indices: &node.children },
                 label: node.label.as_deref(),
             }
@@ -53,7 +49,7 @@ struct HistoryProjection<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HistoryEntry<'a> {
-    source_entry: &'a FileEntry,
+    source_entry: &'a Entry,
     messages: &'a [pi_ai::Message],
 }
 
@@ -80,16 +76,16 @@ pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) 
         "getSessionId" => json!(manager.id()),
         "getSessionFile" => json!(manager.file().map(|path| path.display().to_string())),
         "getLeafId" => json!(manager.leaf_id()),
-        "getLeafEntry" => return HostValue::serialized(&manager.leaf_entry().map(raw)),
-        "getEntry" => return HostValue::serialized(&manager.get_entry(&args.str(2)?).map(raw)),
+        "getLeafEntry" => return HostValue::serialized(&manager.leaf_entry()),
+        "getEntry" => return HostValue::serialized(&manager.get_entry(&args.str(2)?)),
         "getLabel" => json!(manager.get_label(&args.str(2)?)),
         "getBranch" => {
             let from = args.opt_str(2);
-            let entries: Vec<_> = manager.get_branch(from.as_deref()).into_iter().map(raw).collect();
+            let entries = manager.get_branch(from.as_deref());
             return HostValue::serialized(&entries);
         }
         "buildContextEntries" => {
-            let entries: Vec<_> = manager.build_context_entries().into_iter().map(raw).collect();
+            let entries = manager.build_context_entries();
             return HostValue::serialized(&entries);
         }
         "buildSessionProjection" => {
@@ -97,7 +93,7 @@ pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) 
             let entries = projection
                 .entries
                 .iter()
-                .map(|entry| HistoryEntry { source_entry: raw(entry.source), messages: &entry.messages })
+                .map(|entry| HistoryEntry { source_entry: entry.source, messages: &entry.messages })
                 .collect();
             return HostValue::serialized(&HistoryProjection { entries, messages: &projection.messages });
         }
@@ -107,8 +103,8 @@ pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) 
             let thinking_level = context.thinking_level.map_or("off", |level| level.as_str());
             return HostValue::serialized(&HistoryContext { messages: &context.messages, model, thinking_level });
         }
-        "getHeader" => return HostValue::serialized(manager.header_raw()),
-        "getEntries" => return HostValue::serialized(&manager.entries().iter().map(raw).collect::<Vec<_>>()),
+        "getHeader" => return HostValue::serialized(&manager.header_value()),
+        "getEntries" => return HostValue::serialized(&manager.entries()),
         "getTree" => {
             let tree = manager.get_tree();
             return HostValue::serialized(&TreeNodes { tree: &tree, indices: &tree.roots });

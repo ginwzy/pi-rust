@@ -137,9 +137,8 @@ impl AgentSession {
             let branch = session.get_branch(None);
             branch
                 .into_iter()
-                .filter_map(|entry| entry.message())
-                .filter(|message| message.role() == "system")
-                .cloned()
+                .filter(|entry| entry.is_message_role("system"))
+                .filter_map(|entry| entry.message().map(std::borrow::Cow::into_owned))
                 .collect()
         };
         if systems.is_empty() {

@@ -131,7 +131,7 @@ impl FooterComponent {
         {
             let manager = session.session_manager();
             for entry in manager.entries() {
-                match entry.data() {
+                match entry.data().as_ref() {
                     EntryData::Usage(usage) => totals.add(&usage.usage),
                     EntryData::Message(Message::Assistant(assistant)) => {
                         let usage = &assistant.usage;

@@ -69,7 +69,7 @@ pub fn collect_entries_for_branch_summary<'a>(
 }
 
 fn branch_message(entry: &Entry) -> Option<Message> {
-    match entry.data() {
+    match entry.data().as_ref() {
         EntryData::Message(Message::ToolResult(_)) => None,
         EntryData::Message(message) => Some(message.clone()),
         EntryData::CustomMessage(custom) => Some(create_custom_message(
@@ -279,7 +279,7 @@ pub async fn navigate_tree(
         Ok(summary) => summary,
         Err(cancelled) => return Ok(cancelled),
     };
-    let (new_leaf, editor_text) = match target.data() {
+    let (new_leaf, editor_text) = match target.data().as_ref() {
         EntryData::Message(Message::User(user)) => {
             (target.parent_id().map(String::from), Some(user_content_text(&user.content, "")))
         }

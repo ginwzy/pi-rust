@@ -162,14 +162,11 @@ impl InteractiveMode {
         state.pending_tools.iter().find(|(pending, _)| pending == id).map(|(_, tool)| tool.clone())
     }
 
-    fn on_entry_appended(&self, entry: &Value) {
-        let id = entry.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
-        if self.state.borrow_mut().boundary_rendered_entries.remove(&id) {
+    fn on_entry_appended(&self, entry: &Entry) {
+        if self.state.borrow_mut().boundary_rendered_entries.remove(entry.id()) {
             return;
         }
-        let Some(object) = entry.as_object() else { return };
-        let entry = Entry::from_raw(object.clone());
-        match entry.data() {
+        match entry.data().as_ref() {
             crate::session::entry::EntryData::CustomMessage(custom) if custom.display => {
                 let message = crate::messages::create_custom_message(
                     &custom.custom_type,
@@ -181,12 +178,12 @@ impl InteractiveMode {
                 self.add_message_to_chat(&message, false);
             }
             crate::session::entry::EntryData::Usage(_) => {
-                let items = Self::render_items_of(std::slice::from_ref(&entry));
+                let items = Self::render_items_of(std::slice::from_ref(entry));
                 self.render_session_items(items, false, false);
             }
-            crate::session::entry::EntryData::Compaction(_) => self.on_compaction_entry(&entry),
+            crate::session::entry::EntryData::Compaction(_) => self.on_compaction_entry(entry),
             crate::session::entry::EntryData::Custom { .. } => {
-                self.add_custom_entry_to_chat(&Value::Object(entry.raw().clone()));
+                self.add_custom_entry_to_chat(&entry.to_value());
                 self.tui().request_render(false);
             }
             _ => {}
@@ -215,7 +212,7 @@ impl InteractiveMode {
         let (before, later): (Vec<Entry>, Vec<Entry>) =
             retained.iter().cloned().partition(|candidate| !after.iter().any(|id| id == candidate.id()));
         self.render_session_entries(&before, false, false);
-        let summary = entries[0].compaction().cloned();
+        let summary = entries[0].compaction();
         if let Some(compaction) = summary {
             let message = crate::messages::create_compaction_summary_message(
                 &compaction.summary,
@@ -362,11 +359,12 @@ impl InteractiveMode {
             branch
                 .iter()
                 .rev()
-                .find_map(|entry| match entry.data() {
-                    crate::session::entry::EntryData::Message(Message::Assistant(last)) => Some(last.as_ref()),
+                .find_map(|entry| match entry.data().as_ref() {
+                    crate::session::entry::EntryData::Message(Message::Assistant(last)) => {
+                        Some(count_dropped_thinking_blocks(last))
+                    }
                     _ => None,
                 })
-                .map(count_dropped_thinking_blocks)
                 .unwrap_or(0)
         };
         if dropped <= last_dropped {

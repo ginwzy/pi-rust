@@ -182,7 +182,7 @@ impl Harness {
 
     pub fn entries(&self) -> Vec<Value> {
         let manager = self.session.session_manager();
-        manager.entries().iter().map(|entry| Value::Object(entry.raw().clone())).collect()
+        manager.entries().iter().map(|entry| entry.to_value()).collect()
     }
 
     /// The user text of the last request the model received.

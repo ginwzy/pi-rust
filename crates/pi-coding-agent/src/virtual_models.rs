@@ -212,11 +212,11 @@ pub fn get_branch_selection(
     get_model: &dyn Fn(&str, &str) -> Option<Model>,
 ) -> Option<(String, String)> {
     for (index, entry) in branch.iter().enumerate().rev() {
-        match entry.data() {
+        match entry.data().as_ref() {
             EntryData::ModelChange { provider, model_id } => return Some((provider.clone(), model_id.clone())),
             EntryData::Message(Message::Assistant(message)) if !is_virtual_message(message) => {
                 let response = (message.provider.clone(), message.model.clone());
-                let change = branch[..index].iter().rev().find_map(|entry| match entry.data() {
+                let change = branch[..index].iter().rev().find_map(|entry| match entry.data().as_ref() {
                     EntryData::ModelChange { provider, model_id } => Some((provider.clone(), model_id.clone())),
                     _ => None,
                 });
@@ -234,7 +234,7 @@ pub fn get_branch_selection(
 
 /// The latest router state a session branch stores for a virtual model.
 pub fn get_virtual_model_state(branch: &[&Entry], provider: &str, model_id: &str) -> Option<Value> {
-    branch.iter().rev().find_map(|entry| match entry.data() {
+    branch.iter().rev().find_map(|entry| match entry.data().as_ref() {
         EntryData::Custom { custom_type, data: Some(data) } if custom_type == VIRTUAL_MODEL_STATE_ENTRY => {
             let matches = data.get("provider").and_then(Value::as_str) == Some(provider)
                 && data.get("modelId").and_then(Value::as_str) == Some(model_id);

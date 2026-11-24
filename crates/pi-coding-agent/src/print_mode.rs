@@ -62,7 +62,7 @@ pub async fn run_print_mode(
 ) -> i32 {
     let json = mode == OutputMode::Json;
     if json {
-        let header = serde_json::Value::Object(runtime.session().session_manager().header_raw().clone());
+        let header = serde_json::Value::Object(runtime.session().session_manager().header_value());
         write_line(&header.to_string());
         bind_json_output(runtime);
     }

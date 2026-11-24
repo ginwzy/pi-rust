@@ -25,7 +25,7 @@ fn appends_chain_parent_ids_and_advance_the_leaf() {
     assert_eq!(entries[1].parent_id(), Some(id1.as_str()));
     assert_eq!(entries[2].parent_id(), Some(id2.as_str()));
     assert!(
-        matches!(entries[3].data(), EntryData::ModelChange { provider, model_id } if provider == "openai" && model_id == "gpt-4")
+        matches!(entries[3].data().as_ref(), EntryData::ModelChange { provider, model_id } if provider == "openai" && model_id == "gpt-4")
     );
     assert_eq!(entries[4].parent_id(), Some(model.as_str()));
     assert_eq!(entries[4].id(), id3);
@@ -81,7 +81,7 @@ fn compaction_and_custom_entries_join_the_tree() {
     assert_eq!(data.usage, Some(summary_usage));
     let custom_entry = session.get_entry(&custom).unwrap();
     assert!(
-        matches!(custom_entry.data(), EntryData::Custom { custom_type, data } if custom_type == "my_data" && data == &Some(json!({"key": "value"})))
+        matches!(custom_entry.data().as_ref(), EntryData::Custom { custom_type, data } if custom_type == "my_data" && data == &Some(json!({"key": "value"})))
     );
     assert_eq!(custom_entry.parent_id(), Some(compaction.as_str()));
     assert_eq!(session.entries()[4].parent_id(), Some(custom.as_str()));
@@ -177,7 +177,7 @@ fn entry_lookup_and_context_follow_the_current_branch() {
     session.append_message(&assistant("msg4-branch")).unwrap();
     let context = session.build_session_context();
     assert_eq!(context.messages.iter().map(text).collect::<Vec<_>>(), ["msg1", "msg2", "msg4-branch"]);
-    assert_eq!(text(session.get_entry(&id2).unwrap().message().unwrap()), "msg2");
+    assert_eq!(text(&session.get_entry(&id2).unwrap().message().unwrap()), "msg2");
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn labels_set_clear_and_resolve_in_the_tree() {
     assert_eq!(session.get_label(&msg), None);
     let label_id = session.append_label_change(&msg, Some("checkpoint")).unwrap();
     assert_eq!(session.get_label(&msg), Some("checkpoint"));
-    assert!(matches!(session.get_entry(&label_id).unwrap().data(),
+    assert!(matches!(session.get_entry(&label_id).unwrap().data().as_ref(),
         EntryData::Label { target_id, label } if target_id == &msg && label.as_deref() == Some("checkpoint")));
     session.append_label_change(&msg, None).unwrap();
     assert_eq!(session.get_label(&msg), None);

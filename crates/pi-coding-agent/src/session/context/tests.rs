@@ -83,7 +83,7 @@ fn saved_execution_and_llm_share_the_body_but_not_delivery_metadata() {
     let answer = AssistantMessage { content: vec![ContentBlock::text("original")], ..AssistantMessage::empty(&model) };
     let answer = Message::from(answer);
     let answer_id = manager.append_message(&answer).unwrap();
-    let stored = manager.get_entry(&answer_id).unwrap().message().unwrap();
+    let stored = manager.get_entry(&answer_id).unwrap().native_message().unwrap();
     assert_same(&answer, stored);
     let agent = Agent::new(model.clone());
     agent.update_state(|state| state.messages = manager.build_session_context().messages);
@@ -101,8 +101,8 @@ fn saved_execution_and_llm_share_the_body_but_not_delivery_metadata() {
     });
     let queued_id = manager.append_message(&Message::User(queued.clone())).unwrap();
     let saved = manager.get_entry(&queued_id).unwrap();
-    assert!(saved.raw()["message"].get("inputId").is_none());
-    let Message::User(saved) = saved.message().unwrap() else { panic!("expected user") };
+    assert!(saved.to_value()["message"].get("inputId").is_none());
+    let Message::User(saved) = saved.native_message().unwrap() else { panic!("expected user") };
     assert!(!Arc::ptr_eq(&queued, saved));
     assert!(saved.input_id.is_none());
     assert_eq!(queued.input_id.as_deref(), Some("queued-id"));
