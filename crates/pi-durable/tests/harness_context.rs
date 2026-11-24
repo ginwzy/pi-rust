@@ -23,11 +23,11 @@ use support::context;
 use support::harness_support::*;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 fn assistant(text: &str, stop_reason: StopReason) -> Message {
-    Message::Assistant(faux_assistant_message(text, FauxMessageOptions::stop_reason(stop_reason)))
+    Message::from(faux_assistant_message(text, FauxMessageOptions::stop_reason(stop_reason)))
 }
 
 /// Compact message rendering for assertions (upstream `describeMessage`).

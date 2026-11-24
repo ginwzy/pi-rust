@@ -170,6 +170,7 @@ pub(crate) fn from_host<'js>(ctx: &Ctx<'js>, value: HostValue) -> Result<Value<'
     match value {
         HostValue::Undefined => Ok(Value::new_undefined(ctx.clone())),
         HostValue::Json(json) => from_json(ctx, &json).map_err(|error| caught(ctx, error)),
+        HostValue::RawJson(json) => ctx.json_parse(json.get().as_bytes()).map_err(|error| caught(ctx, error)),
         HostValue::Bytes(bytes) => bytes_to_js(ctx, bytes).map_err(|error| caught(ctx, error)),
         HostValue::Ref(reference) => restore(ctx, &reference),
     }

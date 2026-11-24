@@ -211,10 +211,10 @@ fn tool_turn() -> Vec<Message> {
     vec![
         system(json!({"role": "system", "content": "base prompt", "toolsAdded": [tool("base_tool")], "timestamp": 0})),
         Message::user("go"),
-        Message::Assistant(assistant.clone()),
+        Message::from(assistant.clone()),
         system(json!({"role": "system", "content": "mid update", "timestamp": 3})),
         Message::ToolResult(result),
-        Message::Assistant(AssistantMessage { content: vec![ContentBlock::text("ok")], ..assistant }),
+        Message::from(AssistantMessage { content: vec![ContentBlock::text("ok")], ..assistant }),
     ]
 }
 
@@ -246,7 +246,7 @@ async fn system_messages_skip_assistants_that_convert_to_no_blocks() {
         system(json!({"role": "system", "content": "base prompt", "timestamp": 0})),
         Message::user("hi"),
         system(json!({"role": "system", "content": "late update", "timestamp": 2})),
-        Message::Assistant(reasoning_only),
+        Message::from(reasoning_only),
         Message::user("again"),
     ];
     let body = payload(&model, messages).await;
@@ -259,7 +259,7 @@ async fn system_messages_skip_assistants_that_convert_to_no_blocks() {
 async fn system_messages_skip_empty_replies_and_land_before_the_next_sent_assistant() {
     let model = model(json!({"supportsMidConvoSystemMessages": true}));
     let reply = |text: &str, provider: &str, api: &str, id: &str| {
-        Message::Assistant(AssistantMessage {
+        Message::from(AssistantMessage {
             content: vec![ContentBlock::text(text)],
             api: api.into(),
             provider: provider.into(),
@@ -316,13 +316,14 @@ async fn oauth_tool_names_round_trip_and_ids_are_normalized() {
     let mut turn = tool_turn();
     turn.remove(3);
     if let Message::Assistant(assistant) = &mut turn[2] {
+        let assistant = std::sync::Arc::make_mut(assistant);
         (assistant.provider, assistant.api) = ("openai".into(), "openai-responses".into());
         if let ContentBlock::ToolCall(call) = &mut assistant.content[0] {
             (call.name, call.id) = ("read".into(), "call.1/x".into());
         }
     }
     if let Message::ToolResult(result) = &mut turn[3] {
-        result.tool_call_id = "call.1/x".into();
+        std::sync::Arc::make_mut(result).tool_call_id = "call.1/x".into();
     }
     let oauth = StreamOptions { api_key: Some("sk-ant-oat01-token".into()), ..StreamOptions::default() };
     let mut tools_model = model(json!({}));
@@ -419,7 +420,7 @@ async fn copilot_models_use_bearer_auth_and_dynamic_headers() {
 }
 
 fn tool_result(id: &str, content: Vec<ContentBlock>, is_error: bool) -> Message {
-    Message::ToolResult(crate::types::ToolResultMessage {
+    Message::from(crate::types::ToolResultMessage {
         tool_call_id: id.into(),
         tool_name: "shot".into(),
         content,
@@ -433,7 +434,7 @@ async fn error_tool_result_images_follow_all_tool_results() {
     let image = || ContentBlock::Image { data: "AA==".into(), mime_type: "image/png".into() };
     let call =
         |id: &str| ContentBlock::ToolCall(ToolCall { id: id.into(), name: "shot".into(), ..ToolCall::default() });
-    let assistant = Message::Assistant(AssistantMessage {
+    let assistant = Message::from(AssistantMessage {
         content: vec![call("t1"), call("t2")],
         api: API.into(),
         provider: "anthropic".into(),
@@ -466,7 +467,7 @@ async fn error_tool_result_images_follow_all_tool_results() {
 #[tokio::test]
 async fn thinking_from_another_model_is_dropped() {
     let assistant = |model: &str| {
-        Message::Assistant(AssistantMessage {
+        Message::from(AssistantMessage {
             content: vec![
                 ContentBlock::Thinking { thinking: "secret plan".into(), thinking_signature: None, redacted: false },
                 ContentBlock::text("answer"),

@@ -1,6 +1,8 @@
 //! `images.blockImages`: replace image blocks sent to the model with a text placeholder
 //! (upstream `convertToLlmWithBlockImages` in `core/sdk.ts`).
 
+use std::sync::Arc;
+
 use pi_ai::{ContentBlock, Message, UserContent};
 
 pub const BLOCKED_IMAGE_TEXT: &str = "Image reading is disabled.";
@@ -41,13 +43,13 @@ pub fn block_images(messages: Vec<Message>) -> Vec<Message> {
                     UserContent::Text(_) => None,
                 };
                 if let Some(filtered) = filtered {
-                    user.content = UserContent::Blocks(filtered);
+                    Arc::make_mut(&mut user).content = UserContent::Blocks(filtered);
                 }
                 Message::User(user)
             }
             Message::ToolResult(mut result) => {
                 if let Some(filtered) = replace_images(&result.content) {
-                    result.content = filtered;
+                    Arc::make_mut(&mut result).content = filtered;
                 }
                 Message::ToolResult(result)
             }

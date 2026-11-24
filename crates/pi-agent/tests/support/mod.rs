@@ -79,8 +79,8 @@ pub fn scripted(
         let (sender, stream) = event_channel();
         let reason = message.stop_reason;
         let event = match reason {
-            StopReason::Error | StopReason::Aborted => AssistantMessageEvent::Error { reason, error: message },
-            _ => AssistantMessageEvent::Done { reason, message },
+            StopReason::Error | StopReason::Aborted => AssistantMessageEvent::Error { reason, error: message.into() },
+            _ => AssistantMessageEvent::Done { reason, message: message.into() },
         };
         sender.push(event);
         stream

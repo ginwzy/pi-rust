@@ -14,7 +14,7 @@ use super::*;
 use crate::session::SessionManager;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 fn assistant(stop: StopReason, error: Option<&str>, diagnostics: Vec<Value>) -> Message {
@@ -23,7 +23,7 @@ fn assistant(stop: StopReason, error: Option<&str>, diagnostics: Vec<Value>) -> 
     message.stop_reason = stop;
     message.error_message = error.map(String::from);
     message.diagnostics = diagnostics;
-    Message::Assistant(message)
+    Message::from(message)
 }
 
 #[test]

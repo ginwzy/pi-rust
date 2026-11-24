@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use super::client::NodeClient;
 use super::{modules, wire};
 use crate::error::JsError;
-use crate::host::HostFunction;
+use crate::host::{HostFunction, HostValue};
 use crate::runtime::state::Shared;
 use crate::runtime::{JsHandle, OutputStream, UncaughtKind};
 
@@ -139,26 +139,43 @@ impl Bridge {
         };
         match function {
             HostFunction::Sync(function) => {
-                let result = function(args).and_then(|value| wire::encode(&self.handle, &value));
-                self.reply(id, result);
+                write_host_result(&self.client, &self.handle, "reply", id, function(args));
             }
             HostFunction::Async(function) => {
                 let settle_id = self.client.next_id();
                 let _ = self.client.write(&json!({ "t": "reply", "id": id, "async": settle_id }));
                 let (handle, client) = (self.handle.clone(), self.client.clone());
                 self.shared.tokio.spawn(async move {
-                    let result = function(args).await.and_then(|value| wire::encode(&handle, &value));
-                    let frame = match result {
-                        Ok(value) => json!({ "t": "settle", "id": settle_id, "ok": value }),
-                        Err(error) => json!({ "t": "settle", "id": settle_id, "err": wire::error_json(&error) }),
-                    };
-                    let _ = client.write(&frame);
+                    write_host_result(&client, &handle, "settle", &json!(settle_id), function(args).await);
                 });
             }
         }
     }
 }
 
+fn write_host_result(
+    client: &NodeClient,
+    handle: &JsHandle,
+    kind: &str,
+    id: &Value,
+    answer: Result<HostValue, JsError>,
+) {
+    if let Ok(HostValue::RawJson(raw)) = &answer {
+        #[derive(serde::Serialize)]
+        struct RawFrame<'a> {
+            t: &'a str,
+            id: &'a Value,
+            ok: (&'static str, &'a serde_json::value::RawValue),
+        }
+        let _ = client.write(&RawFrame { t: kind, id, ok: ("j", raw) });
+        return;
+    }
+    let frame = match answer.and_then(|value| wire::encode(handle, &value)) {
+        Ok(value) => json!({ "t": kind, "id": id, "ok": value }),
+        Err(error) => json!({ "t": kind, "id": id, "err": wire::error_json(&error) }),
+    };
+    let _ = client.write(&frame);
+}
 pub(crate) fn deliver(shared: &Shared, kind: UncaughtKind, error: &JsError) {
     match &shared.config.on_uncaught {
         Some(callback) => callback(kind, error),

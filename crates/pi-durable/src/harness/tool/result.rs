@@ -95,7 +95,7 @@ pub async fn append_tool_result(
         record_usage(tx, conversation_id, UsageBucket::Tools, &call.name, usage).await?;
     }
     let data = ToolResultData { diagnostics };
-    let draft = TypedEntryDraft { model: Some(vec![Message::ToolResult(message)]), ..TypedEntryDraft::new(data) };
+    let draft = TypedEntryDraft { model: Some(vec![Message::from(message)]), ..TypedEntryDraft::new(data) };
     Ok(tx.append_typed_entry(&TOOL_RESULT_ENTRY, conversation_id, draft).await?.record)
 }
 

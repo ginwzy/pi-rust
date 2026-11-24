@@ -85,7 +85,7 @@ pub async fn run(setup: &ChatSetup, responses: Vec<FauxResponseStep>) -> Run {
     Run { harness, root, entries, status: settled.status }
 }
 
-pub fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
+pub fn results(entries: &[EntryRecord]) -> Vec<Arc<ToolResultMessage>> {
     entries
         .iter()
         .filter(|entry| TOOL_RESULT_ENTRY.is(Some(entry)))

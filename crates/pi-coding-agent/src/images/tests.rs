@@ -229,13 +229,13 @@ fn base64_decoding_is_lenient_like_node() {
 #[test]
 fn block_images_replaces_and_dedupes_placeholders() {
     let image = || ContentBlock::Image { data: "x".into(), mime_type: "image/png".into() };
-    let user = Message::User(UserMessage {
+    let user = Message::from(UserMessage {
         input_id: None,
         content: UserContent::Blocks(vec![ContentBlock::text("look"), image(), image(), ContentBlock::text("end")]),
         timestamp: 1,
     });
-    let result = Message::ToolResult(ToolResultMessage { content: vec![image()], ..Default::default() });
-    let plain = Message::User(UserMessage { input_id: None, content: UserContent::Text("hi".into()), timestamp: 2 });
+    let result = Message::from(ToolResultMessage { content: vec![image()], ..Default::default() });
+    let plain = Message::from(UserMessage { input_id: None, content: UserContent::Text("hi".into()), timestamp: 2 });
     let blocked = block_images(vec![user, result, plain.clone()]);
     let Message::User(user) = &blocked[0] else { panic!() };
     let placeholder = ContentBlock::text(BLOCKED_IMAGE_TEXT);

@@ -138,7 +138,7 @@ impl CompletionsStream {
                 self.text = Some(index);
                 self.push(AssistantMessageEvent::TextStart {
                     content_index: index,
-                    partial: builder.message().clone(),
+                    partial: builder.message().clone().into(),
                 });
                 index
             }
@@ -147,7 +147,11 @@ impl CompletionsStream {
             text.push_str(delta);
         }
         let partial = builder.message().clone();
-        self.push(AssistantMessageEvent::TextDelta { content_index: index, delta: delta.to_string(), partial });
+        self.push(AssistantMessageEvent::TextDelta {
+            content_index: index,
+            delta: delta.to_string(),
+            partial: partial.into(),
+        });
     }
 
     /// The thinking block, created with `signature` when the response has none yet.
@@ -163,7 +167,10 @@ impl CompletionsStream {
         });
         let index = content.len() - 1;
         self.thinking = Some(index);
-        self.push(AssistantMessageEvent::ThinkingStart { content_index: index, partial: builder.message().clone() });
+        self.push(AssistantMessageEvent::ThinkingStart {
+            content_index: index,
+            partial: builder.message().clone().into(),
+        });
         index
     }
 
@@ -173,7 +180,11 @@ impl CompletionsStream {
             thinking.push_str(delta);
         }
         let partial = builder.message().clone();
-        self.push(AssistantMessageEvent::ThinkingDelta { content_index: index, delta: delta.to_string(), partial });
+        self.push(AssistantMessageEvent::ThinkingDelta {
+            content_index: index,
+            delta: delta.to_string(),
+            partial: partial.into(),
+        });
     }
 
     /// Store the streamed `reasoning_details` as the thinking signature for replay.
@@ -193,11 +204,15 @@ impl CompletionsStream {
             let event = match &message.content[index] {
                 ContentBlock::Text { text, .. } if self.text == Some(index) => {
                     let content = text.clone();
-                    AssistantMessageEvent::TextEnd { content_index: index, content, partial: message.clone() }
+                    AssistantMessageEvent::TextEnd { content_index: index, content, partial: message.clone().into() }
                 }
                 ContentBlock::Thinking { thinking, .. } if self.thinking == Some(index) => {
                     let content = thinking.clone();
-                    AssistantMessageEvent::ThinkingEnd { content_index: index, content, partial: message.clone() }
+                    AssistantMessageEvent::ThinkingEnd {
+                        content_index: index,
+                        content,
+                        partial: message.clone().into(),
+                    }
                 }
                 ContentBlock::ToolCall(_) => {
                     self.tools.finish(builder, &self.sender, index)?;

@@ -17,11 +17,11 @@ fn model() -> Model {
 }
 
 fn user(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 fn assistant(timestamp: i64, total_tokens: u64) -> Message {
-    Message::Assistant(AssistantMessage {
+    Message::from(AssistantMessage {
         content: vec![crate::types::ContentBlock::text("kept")],
         usage: Usage { input: total_tokens, total_tokens, ..Usage::default() },
         stop_reason: StopReason::Stop,

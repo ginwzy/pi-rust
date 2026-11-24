@@ -25,7 +25,7 @@ fn user_text(message: &Message) -> Option<String> {
 #[tokio::test]
 async fn continue_processes_queued_follow_ups_after_an_assistant_turn() {
     let (_, stream_fn) = scripted(|_, _| text("Processed"));
-    let messages = vec![Message::user("Initial"), Message::Assistant(text("Initial response"))];
+    let messages = vec![Message::user("Initial"), Message::from(text("Initial response"))];
     let agent = agent(stream_fn, AgentInitialState { messages, ..Default::default() });
     agent.follow_up(Message::user("Queued follow-up"));
     agent.continue_run().await.unwrap();
@@ -38,7 +38,7 @@ async fn continue_processes_queued_follow_ups_after_an_assistant_turn() {
 async fn continue_keeps_steering_mode_semantics_for_an_assistant_tail() {
     for (mode, expected_requests) in [(QueueMode::OneAtATime, 2), (QueueMode::All, 1)] {
         let (requests, stream_fn) = scripted(|_, _| text("Processed"));
-        let messages = vec![Message::user("Initial"), Message::Assistant(text("Initial response"))];
+        let messages = vec![Message::user("Initial"), Message::from(text("Initial response"))];
         let agent = agent(stream_fn, AgentInitialState { messages, ..Default::default() });
         agent.set_queue_modes(mode, QueueMode::OneAtATime);
         agent.steer(Message::user("Steering 1"));

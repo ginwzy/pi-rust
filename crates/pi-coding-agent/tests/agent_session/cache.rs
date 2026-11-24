@@ -32,7 +32,7 @@ fn scripted(script: Arc<Script>) -> StreamFn {
         message.usage = usage;
         message.stop_reason = if options.max_tokens == Some(1) { StopReason::Length } else { StopReason::Stop };
         message.timestamp = pi_ai::now_ms();
-        sender.push(AssistantMessageEvent::Done { reason: message.stop_reason, message });
+        sender.push(AssistantMessageEvent::Done { reason: message.stop_reason, message: message.into() });
         stream
     })
 }

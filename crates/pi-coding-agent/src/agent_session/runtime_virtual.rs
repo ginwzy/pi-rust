@@ -29,7 +29,7 @@ pub struct RouteOptions {
     pub thinking_level: ThinkingLevel,
     pub cancel: CancellationToken,
     /// For `retry`: the failed response, which the messages no longer contain.
-    pub failed: Option<AssistantMessage>,
+    pub failed: Option<Arc<AssistantMessage>>,
     /// Router state stored by the caller, which also stores the returned state.
     pub state: Option<Value>,
 }

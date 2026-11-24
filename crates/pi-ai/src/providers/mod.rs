@@ -34,3 +34,5 @@ mod provider_env;
 #[cfg(test)]
 mod streaming_arguments_tests;
 mod transform;
+
+pub use transform::transform_messages;

@@ -170,7 +170,7 @@ impl AgentSession {
     fn run_would_continue(&self, message: &AssistantMessage) -> bool {
         match message.stop_reason {
             StopReason::Aborted => false,
-            StopReason::Error => self.will_retry_after_agent_end(&[Message::Assistant(message.clone())]),
+            StopReason::Error => self.will_retry_after_agent_end(&[Message::from(message.clone())]),
             _ => message.tool_calls().next().is_some() || self.agent.has_queued_messages(),
         }
     }

@@ -32,6 +32,7 @@ fn prompt_of(provider: &FauxProvider, index: usize) -> String {
 fn tool_call(name: &str, path: &str) -> Message {
     let mut message = assistant("");
     if let Message::Assistant(assistant) = &mut message {
+        let assistant = std::sync::Arc::make_mut(assistant);
         assistant.content = vec![ContentBlock::ToolCall(ToolCall {
             id: format!("{name}-{path}"),
             name: name.into(),

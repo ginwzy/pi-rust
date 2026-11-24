@@ -59,30 +59,38 @@ fn events(result: &AssistantMessage) -> Vec<AssistantMessageEvent> {
     let partial = result.clone();
     let terminal = match result.stop_reason {
         StopReason::Error | StopReason::Aborted => {
-            AssistantMessageEvent::Error { reason: result.stop_reason, error: result.clone() }
+            AssistantMessageEvent::Error { reason: result.stop_reason, error: result.clone().into() }
         }
-        reason => AssistantMessageEvent::Done { reason, message: result.clone() },
+        reason => AssistantMessageEvent::Done { reason, message: result.clone().into() },
     };
     vec![
-        AssistantMessageEvent::Start { partial: partial.clone() },
-        AssistantMessageEvent::TextDelta { content_index: 0, delta: "text-secret".into(), partial: partial.clone() },
-        AssistantMessageEvent::TextEnd { content_index: 0, content: "text-secret".into(), partial: partial.clone() },
+        AssistantMessageEvent::Start { partial: partial.clone().into() },
+        AssistantMessageEvent::TextDelta {
+            content_index: 0,
+            delta: "text-secret".into(),
+            partial: partial.clone().into(),
+        },
+        AssistantMessageEvent::TextEnd {
+            content_index: 0,
+            content: "text-secret".into(),
+            partial: partial.clone().into(),
+        },
         AssistantMessageEvent::ThinkingEnd {
             content_index: 1,
             content: "thinking-secret".into(),
-            partial: partial.clone(),
+            partial: partial.clone().into(),
         },
         AssistantMessageEvent::ToolcallDelta {
             content_index: 2,
             delta: r#"{"value":"#.into(),
-            partial: partial.clone(),
+            partial: partial.clone().into(),
         },
         AssistantMessageEvent::ToolcallDelta {
             content_index: 2,
             delta: r#""argument-secret"}"#.into(),
-            partial: partial.clone(),
+            partial: partial.clone().into(),
         },
-        AssistantMessageEvent::ToolcallEnd { content_index: 2, tool_call, partial },
+        AssistantMessageEvent::ToolcallEnd { content_index: 2, tool_call, partial: partial.into() },
         terminal,
     ]
 }
@@ -286,12 +294,12 @@ async fn counts_interleaved_tool_deltas_independently() {
     let delta = |content_index, delta: &str| AssistantMessageEvent::ToolcallDelta {
         content_index,
         delta: delta.into(),
-        partial: partial.clone(),
+        partial: partial.clone().into(),
     };
     let end = |content_index| AssistantMessageEvent::ToolcallEnd {
         content_index,
         tool_call: tool_call.clone(),
-        partial: partial.clone(),
+        partial: partial.clone().into(),
     };
     let script = vec![
         delta(2, "ab"),
@@ -300,7 +308,7 @@ async fn counts_interleaved_tool_deltas_independently() {
         end(3),
         end(2),
         end(4),
-        AssistantMessageEvent::Done { reason: StopReason::Stop, message: result },
+        AssistantMessageEvent::Done { reason: StopReason::Stop, message: result.into() },
     ];
     pi_ai::register_api_provider(model.api.clone(), Arc::new(Scripted(script)));
     let telemetry = InMemoryTelemetryContext::new();

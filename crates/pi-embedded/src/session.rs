@@ -173,9 +173,10 @@ impl EmbeddedSession {
                     state.status = SessionStatus::Interrupted;
                 }
                 if let Some(mut partial) = state.partial.take() {
-                    partial.stop_reason = StopReason::Aborted;
-                    partial.error_message = Some("Host interrupted during generation".into());
-                    state.messages.push(Message::Assistant(partial));
+                    let interrupted = std::sync::Arc::make_mut(&mut partial);
+                    interrupted.stop_reason = StopReason::Aborted;
+                    interrupted.error_message = Some("Host interrupted during generation".into());
+                    state.messages.push(Message::from(partial));
                     state.needs_response = true;
                 }
                 for invocation in &mut state.invocations {
@@ -209,7 +210,7 @@ impl EmbeddedSession {
         if text.trim().is_empty() {
             anyhow::bail!("Message is empty");
         }
-        Ok(Message::User(pi_ai::UserMessage {
+        Ok(Message::from(pi_ai::UserMessage {
             input_id: None,
             content: UserContent::Text(text.into()),
             timestamp: now_ms(),
@@ -422,7 +423,7 @@ impl EmbeddedSession {
                 tools_removed: None,
                 timestamp: now_ms(),
             };
-            messages.insert(0, Message::System(summary));
+            messages.insert(0, Message::from(summary));
         }
         messages
     }

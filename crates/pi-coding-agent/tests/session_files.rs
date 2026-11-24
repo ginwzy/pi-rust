@@ -262,7 +262,7 @@ fn tool_and_summary_usage_survive_a_reload() {
         usage: Some(summary_usage),
         ..Default::default()
     };
-    session.append_message(&Message::ToolResult(result)).unwrap();
+    session.append_message(&Message::from(result)).unwrap();
     session
         .append_compaction_with(pi_coding_agent::session::NewCompaction {
             summary: "summary".into(),

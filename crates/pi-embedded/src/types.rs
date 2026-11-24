@@ -1,5 +1,7 @@
 //! Persisted and published data shapes. JSON field names match upstream `src/types.ts`.
 
+use std::sync::Arc;
+
 use pi_agent::{AgentEvent, AgentToolResult};
 use pi_ai::{AssistantMessage, ContentBlock, JsonObject, Message, Model, Usage};
 use serde::{Deserialize, Serialize};
@@ -122,7 +124,7 @@ pub struct SessionSnapshot {
     pub model: Model,
     pub messages: Vec<Message>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub partial: Option<AssistantMessage>,
+    pub partial: Option<Arc<AssistantMessage>>,
     /// Saved user messages for the next turn after the current tool batch.
     pub steering: Vec<Message>,
     /// Saved user messages to run after current work and steering finish.

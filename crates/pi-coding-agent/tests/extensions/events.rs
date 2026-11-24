@@ -1,5 +1,7 @@
 //! Extension events with their upstream payloads and return semantics.
 
+use std::sync::Arc;
+
 use pi_ai::providers::faux::FauxResponse;
 use pi_ai::{Message, StopReason, UserContent};
 use pi_coding_agent::messages::CustomMessage;
@@ -90,6 +92,54 @@ async fn before_agent_start_and_context_change_what_the_model_sees() {
         transcript.contains(&"user: question".to_string()),
         "context edits stay out of the session: {transcript:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn context_hooks_reuse_unchanged_saved_messages_and_isolate_edits() {
+    let body = r#"
+	pi.on("context", (event) => {
+		const previous = event.messages.find(message => message.role === "assistant");
+		if (!previous) return { messages: event.messages };
+		const firstUser = event.messages.find(message => message.role === "user");
+		firstUser.content = [{ type: "text", text: "request only" }];
+		return { messages: event.messages.map(message => message === previous
+			? JSON.parse(JSON.stringify(message)) : message) };
+	});
+"#;
+    let h = harness(Setup {
+        files: vec![("context.ts", with_probe(body))],
+        load: vec!["context.ts"],
+        responses: vec![FauxResponse::text("saved answer"), FauxResponse::text("next answer")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("saved question", Vec::new()).await.unwrap();
+    let saved = h.session.session_manager().build_session_context().messages;
+    h.session.prompt("next question", Vec::new()).await.unwrap();
+    let request = h.provider.requests().pop().unwrap();
+    let assistant = |messages: &[Message]| {
+        messages
+            .iter()
+            .find_map(|message| match message {
+                Message::Assistant(body) => Some(body.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let user = |messages: &[Message]| {
+        messages
+            .iter()
+            .find_map(|message| match message {
+                Message::User(body) => Some(body.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert!(Arc::ptr_eq(&assistant(&saved), &assistant(&request.messages)));
+    assert!(!Arc::ptr_eq(&user(&saved), &user(&request.messages)));
+    assert_eq!(user(&request.messages).content.text(), "request only");
+    assert_eq!(user(&saved).content.text(), "saved question");
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
 }
 
 #[tokio::test(flavor = "multi_thread")]

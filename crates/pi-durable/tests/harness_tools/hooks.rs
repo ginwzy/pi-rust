@@ -65,7 +65,7 @@ async fn replaces_request_messages_observes_responses_and_continues_on_yield() {
     };
     let inject = GenerationHooks {
         before_request: Some(Arc::new(|mut messages: Vec<Message>, _, _| {
-            messages.push(Message::User(UserMessage {
+            messages.push(Message::from(UserMessage {
                 input_id: None,
                 content: UserContent::Text("injected".into()),
                 timestamp: 0,
@@ -79,7 +79,7 @@ async fn replaces_request_messages_observes_responses_and_continues_on_yield() {
     let sink = responses.clone();
     let observe = GenerationHooks {
         after_response: Some(Arc::new(move |message: pi_ai::AssistantMessage, _, _| {
-            sink.lock().unwrap().push(text_of(Some(&Message::Assistant(message))).unwrap_or_default());
+            sink.lock().unwrap().push(text_of(Some(&Message::from(message))).unwrap_or_default());
             Box::pin(async { Ok(()) })
         })),
         ..GenerationHooks::default()
@@ -156,7 +156,7 @@ async fn observes_responses_that_arrive_by_polling_a_deferred_request() {
     let observe = GenerationHooks {
         after_response: Some(Arc::new(move |message: pi_ai::AssistantMessage, _, _| {
             let reason = serde_json::to_value(message.stop_reason).unwrap();
-            let text = text_of(Some(&Message::Assistant(message))).unwrap_or_default();
+            let text = text_of(Some(&Message::from(message))).unwrap_or_default();
             sink.lock().unwrap().push(format!("{}:{text}", reason.as_str().unwrap()));
             Box::pin(async { Ok(()) })
         })),

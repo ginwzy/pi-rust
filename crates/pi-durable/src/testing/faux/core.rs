@@ -60,7 +60,7 @@ fn deferred_message(model: &Model, handle: &DeferredHandle) -> AssistantMessage 
 }
 
 fn push_error(sender: &EventSender, message: AssistantMessage) {
-    sender.push(AssistantMessageEvent::Error { reason: StopReason::Error, error: message });
+    sender.push(AssistantMessageEvent::Error { reason: StopReason::Error, error: message.into() });
 }
 
 struct DeferredEntry {

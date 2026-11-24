@@ -1,5 +1,7 @@
 //! The remaining upstream inbox storage cases (reopen, positional operations, bases) and usage cases.
 
+use std::sync::Arc;
+
 use pi_ai::AssistantMessage;
 use pi_chord::delta::Op;
 use pi_durable::documents::CheckpointInfo;
@@ -167,7 +169,7 @@ fn keeps_a_complete_inbox_base_exactly_while_it_is_empty_and_a_usage_base_on_eve
     assert!(usage.checkpoint_when(&Json::from(json!({ "models": {}, "tools": {} })), &[], info()).unwrap());
 }
 
-fn assistants(entries: &[EntryRecord]) -> Vec<AssistantMessage> {
+fn assistants(entries: &[EntryRecord]) -> Vec<Arc<AssistantMessage>> {
     let messages = entries.iter().filter(|entry| entry.kind == "pi.assistant");
     messages
         .filter_map(|entry| match entry.model.as_ref()?.first()? {

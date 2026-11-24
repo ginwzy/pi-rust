@@ -68,7 +68,7 @@ mod tests {
     }
 
     fn image_user() -> Message {
-        Message::User(UserMessage {
+        Message::from(UserMessage {
             input_id: None,
             content: UserContent::Blocks(vec![ContentBlock::Image {
                 data: "AA==".into(),
@@ -87,11 +87,11 @@ mod tests {
             vec![("X-Initiator", "user".to_string()), ("Openai-Intent", "conversation-edits".to_string())]
         );
 
-        let tool_result = Message::ToolResult(ToolResultMessage {
+        let tool_result = Message::from(ToolResultMessage {
             content: vec![ContentBlock::Image { data: "AA==".into(), mime_type: "image/png".into() }],
             ..ToolResultMessage::default()
         });
-        let messages = [Message::user("hi"), Message::Assistant(AssistantMessage::default()), tool_result];
+        let messages = [Message::user("hi"), Message::from(AssistantMessage::default()), tool_result];
         let headers = copilot_dynamic_headers(&model, &messages);
         assert_eq!(headers[0], ("X-Initiator", "agent".to_string()));
         assert_eq!(headers[2], ("Copilot-Vision-Request", "true".to_string()));

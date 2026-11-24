@@ -124,7 +124,7 @@ fn collects_the_abandoned_branch_and_budgets_newest_first() {
 fn tool_call_message(name: &str, path: &str) -> pi_ai::Message {
     let mut message = assistant("");
     if let pi_ai::Message::Assistant(assistant) = &mut message {
-        assistant.content = vec![ContentBlock::ToolCall(pi_ai::ToolCall {
+        std::sync::Arc::make_mut(assistant).content = vec![ContentBlock::ToolCall(pi_ai::ToolCall {
             id: "call".into(),
             name: name.into(),
             arguments: json!({"path": path}).as_object().unwrap().clone(),

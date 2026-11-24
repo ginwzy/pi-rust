@@ -197,5 +197,5 @@ fn system_entry(sections: Option<Patch>, tools: Option<ToolChanges>, timestamp: 
         tools_removed: (!removed.is_empty()).then_some(removed),
         timestamp: timestamp as i64,
     };
-    EntryDraft { model: Some(vec![Message::System(message)]), ..EntryDraft::new(SYSTEM_ENTRY.kind()) }
+    EntryDraft { model: Some(vec![Message::from(message)]), ..EntryDraft::new(SYSTEM_ENTRY.kind()) }
 }

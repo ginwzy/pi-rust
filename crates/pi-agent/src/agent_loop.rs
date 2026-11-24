@@ -208,7 +208,7 @@ async fn run_loop(
     cancel: &CancellationToken,
 ) {
     let mut config = initial_config.clone();
-    let mut last_turn: Option<(AssistantMessage, Vec<ToolResultMessage>)> = None;
+    let mut last_turn: Option<(Arc<AssistantMessage>, Vec<Arc<ToolResultMessage>>)> = None;
     let mut explicit_continuation = false;
     // The user may have typed while the run was starting.
     let mut pending = take(&config.get_steering_messages).await;
@@ -307,8 +307,8 @@ async fn run_loop(
 
 async fn finish_turn(
     hook: &Option<FinishTurnFn>,
-    message: &AssistantMessage,
-    tool_results: &[ToolResultMessage],
+    message: &Arc<AssistantMessage>,
+    tool_results: &[Arc<ToolResultMessage>],
     context: &AgentContext,
     new_messages: &[Message],
     cancel: &CancellationToken,
@@ -336,14 +336,17 @@ async fn stream_assistant_response(
     config: &AgentLoopConfig,
     emit: &EventSink,
     cancel: &CancellationToken,
-) -> AssistantMessage {
-    let mut messages = context.messages.clone();
-    if let Some(transform) = &config.transform_context {
-        messages = transform(messages, cancel.clone()).await;
-    }
+) -> Arc<AssistantMessage> {
+    let transformed;
+    let messages = if let Some(transform) = &config.transform_context {
+        transformed = transform(context.messages.clone(), cancel.clone()).await;
+        &transformed
+    } else {
+        &context.messages
+    };
     let messages = match &config.convert_to_llm {
-        Some(convert) => convert(&messages),
-        None => default_convert_to_llm(&messages),
+        Some(convert) => convert(messages),
+        None => default_convert_to_llm(messages),
     };
     // A transcript context reaches the provider as messages only: system messages carry the
     // prompt and the tool declarations.
@@ -376,33 +379,40 @@ async fn stream_assistant_response(
 
     let mut added_partial = false;
     while let Some(event) = response.next().await {
-        match &event {
+        match event {
             AssistantMessageEvent::Start { partial } => {
                 context.messages.push(Message::Assistant(partial.clone()));
                 added_partial = true;
-                emit(AgentEvent::MessageStart { message: Message::Assistant(partial.clone()) }).await;
+                emit(AgentEvent::MessageStart { message: Message::Assistant(partial) }).await;
             }
-            AssistantMessageEvent::Done { message, .. } | AssistantMessageEvent::Error { error: message, .. } => {
-                let mut message = message.clone();
+            AssistantMessageEvent::Done { mut message, .. }
+            | AssistantMessageEvent::Error { error: mut message, .. } => {
                 // Record the requested level, whichever stream function answered.
-                message.thinking_level = Some(config.reasoning.unwrap_or(ThinkingLevel::Off));
+                let level = Some(config.reasoning.unwrap_or(ThinkingLevel::Off));
+                if message.thinking_level != level {
+                    Arc::make_mut(&mut message).thinking_level = level;
+                }
                 return finish_response(context, message, added_partial, emit).await;
             }
-            AssistantMessageEvent::TextStart { partial, .. }
-            | AssistantMessageEvent::TextDelta { partial, .. }
-            | AssistantMessageEvent::TextEnd { partial, .. }
-            | AssistantMessageEvent::ThinkingStart { partial, .. }
-            | AssistantMessageEvent::ThinkingDelta { partial, .. }
-            | AssistantMessageEvent::ThinkingEnd { partial, .. }
-            | AssistantMessageEvent::ToolcallStart { partial, .. }
-            | AssistantMessageEvent::ToolcallDelta { partial, .. }
-            | AssistantMessageEvent::ToolcallEnd { partial, .. } => {
+            ref delta => {
                 if added_partial {
+                    let partial = match delta {
+                        AssistantMessageEvent::TextStart { partial, .. }
+                        | AssistantMessageEvent::TextDelta { partial, .. }
+                        | AssistantMessageEvent::TextEnd { partial, .. }
+                        | AssistantMessageEvent::ThinkingStart { partial, .. }
+                        | AssistantMessageEvent::ThinkingDelta { partial, .. }
+                        | AssistantMessageEvent::ThinkingEnd { partial, .. }
+                        | AssistantMessageEvent::ToolcallStart { partial, .. }
+                        | AssistantMessageEvent::ToolcallDelta { partial, .. }
+                        | AssistantMessageEvent::ToolcallEnd { partial, .. } => partial,
+                        _ => unreachable!(),
+                    };
                     let message = Message::Assistant(partial.clone());
                     if let Some(last) = context.messages.last_mut() {
                         *last = message.clone();
                     }
-                    emit(AgentEvent::MessageUpdate { message, assistant_message_event: event.clone() }).await;
+                    emit(AgentEvent::MessageUpdate { message, assistant_message_event: event }).await;
                 }
             }
         }
@@ -411,15 +421,15 @@ async fn stream_assistant_response(
     message.stop_reason = if cancel.is_cancelled() { StopReason::Aborted } else { StopReason::Error };
     message.error_message = Some("Provider stream ended without a final event".into());
     message.thinking_level = Some(config.reasoning.unwrap_or(ThinkingLevel::Off));
-    finish_response(context, message, added_partial, emit).await
+    finish_response(context, Arc::new(message), added_partial, emit).await
 }
 
 async fn finish_response(
     context: &mut AgentContext,
-    message: AssistantMessage,
+    message: Arc<AssistantMessage>,
     added_partial: bool,
     emit: &EventSink,
-) -> AssistantMessage {
+) -> Arc<AssistantMessage> {
     let wrapped = Message::Assistant(message.clone());
     if added_partial {
         if let Some(last) = context.messages.last_mut() {

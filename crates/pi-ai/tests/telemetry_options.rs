@@ -27,7 +27,8 @@ fn model(api: &str, model_type: Option<&str>) -> Model {
 
 fn completed(model: &Model) -> AssistantMessageEventStream {
     let (sender, stream) = event_channel();
-    sender.push(AssistantMessageEvent::Done { reason: StopReason::Stop, message: AssistantMessage::empty(model) });
+    sender
+        .push(AssistantMessageEvent::Done { reason: StopReason::Stop, message: AssistantMessage::empty(model).into() });
     stream
 }
 

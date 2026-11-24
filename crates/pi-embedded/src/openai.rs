@@ -40,7 +40,7 @@ pub fn create_openai_stream(network: Arc<dyn NetworkAdapter>, credentials: Arc<d
                 let reason = if cancel.is_cancelled() { StopReason::Aborted } else { StopReason::Error };
                 message.stop_reason = reason;
                 message.error_message = Some(error.to_string());
-                sender.push(AssistantMessageEvent::Error { reason, error: message });
+                sender.push(AssistantMessageEvent::Error { reason, error: message.into() });
             }
             cancel.cancel();
         });
@@ -104,7 +104,7 @@ impl Request<'_> {
             drop(response.body);
             anyhow::bail!("Provider HTTP {}", response.status);
         }
-        self.sender.push(AssistantMessageEvent::Start { partial: self.partial() });
+        self.sender.push(AssistantMessageEvent::Start { partial: self.partial().into() });
         let mut body = response.body;
         let mut decoder = SseDecoder::default();
         let mut state = Progress::default();
@@ -166,8 +166,10 @@ impl Request<'_> {
                     self.message.content.push(ContentBlock::text(""));
                     let index = self.message.content.len() - 1;
                     state.text_index = Some(index);
-                    self.sender
-                        .push(AssistantMessageEvent::TextStart { content_index: index, partial: self.partial() });
+                    self.sender.push(AssistantMessageEvent::TextStart {
+                        content_index: index,
+                        partial: self.partial().into(),
+                    });
                     index
                 }
             };
@@ -175,7 +177,11 @@ impl Request<'_> {
                 current.push_str(text);
             }
             let delta = text.to_string();
-            self.sender.push(AssistantMessageEvent::TextDelta { content_index: index, delta, partial: self.partial() });
+            self.sender.push(AssistantMessageEvent::TextDelta {
+                content_index: index,
+                delta,
+                partial: self.partial().into(),
+            });
         }
         for fragment in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
             let index = fragment["index"].as_u64().unwrap_or_default();
@@ -188,7 +194,7 @@ impl Request<'_> {
                     let content_index = self.message.content.len() - 1;
                     state.fragments.push(Fragment { index, json: String::new(), content_index });
                     let partial = self.partial();
-                    self.sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial });
+                    self.sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: partial.into() });
                     state.fragments.len() - 1
                 }
             };
@@ -206,7 +212,11 @@ impl Request<'_> {
                 anyhow::bail!("Tool arguments exceed 4 MiB");
             }
             let partial = self.partial();
-            self.sender.push(AssistantMessageEvent::ToolcallDelta { content_index, delta: arguments, partial });
+            self.sender.push(AssistantMessageEvent::ToolcallDelta {
+                content_index,
+                delta: arguments,
+                partial: partial.into(),
+            });
         }
         Ok(false)
     }
@@ -217,7 +227,11 @@ impl Request<'_> {
         };
         if let Some(index) = state.text_index {
             let content = self.message.content[index].as_text().unwrap_or_default().to_string();
-            self.sender.push(AssistantMessageEvent::TextEnd { content_index: index, content, partial: self.partial() });
+            self.sender.push(AssistantMessageEvent::TextEnd {
+                content_index: index,
+                content,
+                partial: self.partial().into(),
+            });
         }
         let truncated = finish == "length";
         for entry in &state.fragments {
@@ -233,7 +247,7 @@ impl Request<'_> {
             }
             let tool_call = self.call_mut(entry.content_index).clone();
             let (content_index, partial) = (entry.content_index, self.partial());
-            self.sender.push(AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial });
+            self.sender.push(AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial: partial.into() });
         }
         self.message.stop_reason = match () {
             _ if truncated => StopReason::Length,
@@ -241,7 +255,7 @@ impl Request<'_> {
             _ => StopReason::Stop,
         };
         let reason = self.message.stop_reason;
-        self.sender.push(AssistantMessageEvent::Done { reason, message: self.partial() });
+        self.sender.push(AssistantMessageEvent::Done { reason, message: self.partial().into() });
         Ok(())
     }
 }
@@ -299,7 +313,7 @@ impl Compactor for ModelCompactor {
         let user = UserMessage { input_id: None, content: UserContent::Text(transcript), timestamp: now_ms() };
         let context = Context {
             system_prompt: None,
-            messages: vec![Message::System(system), Message::User(user)],
+            messages: vec![Message::from(system), Message::from(user)],
             tools: Vec::new(),
         };
         let mut events = (self.stream)(&model, &context, StreamOptions { cancel, ..StreamOptions::default() });

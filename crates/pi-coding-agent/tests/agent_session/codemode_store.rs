@@ -31,8 +31,8 @@ fn store_entries(h: &Harness) -> Vec<Value> {
 #[tokio::test]
 async fn persists_store_writes_as_custom_entries_for_later_calls() {
     let h = codemode_harness(&["codemode"], Vec::new(), Options::default()).await;
-    assert_eq!(output(&run(&h, INCREMENT).await), "1");
-    assert_eq!(output(&run(&h, INCREMENT).await), "2");
+    assert_eq!(output(run(&h, INCREMENT).await.as_ref()), "1");
+    assert_eq!(output(run(&h, INCREMENT).await.as_ref()), "2");
     assert_eq!(
         store_entries(&h),
         [json!({ "set": { "count": 1 }, "delete": [] }), json!({ "set": { "count": 2 }, "delete": [] })]
@@ -62,11 +62,11 @@ async fn loads_the_values_written_on_the_current_branch() {
         let branch = manager.get_branch(None);
         branch.iter().find(|entry| entry.raw()["type"] == "message").unwrap().id().to_string()
     };
-    assert_eq!(output(&run(&h, INCREMENT).await), "2");
+    assert_eq!(output(run(&h, INCREMENT).await.as_ref()), "2");
 
     // Branch from the first prompt: the store entries written after it are on another path.
     h.session.session_manager().branch(&first_prompt).unwrap();
-    assert_eq!(output(&run(&h, INCREMENT).await), "1");
+    assert_eq!(output(run(&h, INCREMENT).await.as_ref()), "1");
 
     // Navigating back to the second write on the first path brings its value back.
     let second_write = {
@@ -76,7 +76,7 @@ async fn loads_the_values_written_on_the_current_branch() {
         writes.map(|entry| entry.id().to_string()).nth(1).unwrap()
     };
     h.session.navigate_tree(&second_write, NavigateTreeOptions::default()).await.unwrap();
-    assert_eq!(output(&run(&h, INCREMENT).await), "3");
+    assert_eq!(output(run(&h, INCREMENT).await.as_ref()), "3");
 }
 
 #[tokio::test]

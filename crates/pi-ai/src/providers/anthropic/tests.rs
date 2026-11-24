@@ -169,7 +169,7 @@ fn history(model_id: &str) -> Vec<Message> {
         duration_ms: None,
         ..Default::default()
     };
-    vec![Message::user("hi"), Message::Assistant(assistant), Message::ToolResult(result)]
+    vec![Message::user("hi"), Message::from(assistant), Message::from(result)]
 }
 
 pub(super) fn tools() -> Vec<Tool> {

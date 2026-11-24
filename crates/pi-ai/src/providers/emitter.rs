@@ -24,7 +24,7 @@ impl Emitter {
     }
 
     pub fn start(&self) {
-        self.emit(|partial| AssistantMessageEvent::Start { partial });
+        self.emit(|partial| AssistantMessageEvent::Start { partial: partial.into() });
     }
 
     /// Append `block` and emit its start event; returns the content index.
@@ -33,12 +33,12 @@ impl Emitter {
         let content_index = self.message.content.len() - 1;
         match &self.message.content[content_index] {
             ContentBlock::Thinking { .. } => {
-                self.emit(|partial| AssistantMessageEvent::ThinkingStart { content_index, partial })
+                self.emit(|partial| AssistantMessageEvent::ThinkingStart { content_index, partial: partial.into() })
             }
             ContentBlock::ToolCall(_) => {
-                self.emit(|partial| AssistantMessageEvent::ToolcallStart { content_index, partial })
+                self.emit(|partial| AssistantMessageEvent::ToolcallStart { content_index, partial: partial.into() })
             }
-            _ => self.emit(|partial| AssistantMessageEvent::TextStart { content_index, partial }),
+            _ => self.emit(|partial| AssistantMessageEvent::TextStart { content_index, partial: partial.into() }),
         }
         content_index
     }
@@ -48,11 +48,15 @@ impl Emitter {
         match self.message.content.get(content_index) {
             Some(ContentBlock::Text { text, .. }) => {
                 let content = text.clone();
-                self.emit(|partial| AssistantMessageEvent::TextEnd { content_index, content, partial });
+                self.emit(|partial| AssistantMessageEvent::TextEnd { content_index, content, partial: partial.into() });
             }
             Some(ContentBlock::Thinking { thinking, .. }) => {
                 let content = thinking.clone();
-                self.emit(|partial| AssistantMessageEvent::ThinkingEnd { content_index, content, partial });
+                self.emit(|partial| AssistantMessageEvent::ThinkingEnd {
+                    content_index,
+                    content,
+                    partial: partial.into(),
+                });
             }
             _ => {}
         }
@@ -69,9 +73,9 @@ impl Emitter {
         let message = self.message.clone();
         match reason {
             StopReason::Error | StopReason::Aborted => {
-                self.sender.push(AssistantMessageEvent::Error { reason, error: message })
+                self.sender.push(AssistantMessageEvent::Error { reason, error: message.into() })
             }
-            _ => self.sender.push(AssistantMessageEvent::Done { reason, message }),
+            _ => self.sender.push(AssistantMessageEvent::Done { reason, message: message.into() }),
         }
     }
 }
@@ -82,7 +86,7 @@ impl Drop for Emitter {
             self.message.stop_reason = StopReason::Error;
             self.message.error_message = Some("Provider stopped before completing the response".into());
             let error = self.message.clone();
-            self.sender.push(AssistantMessageEvent::Error { reason: StopReason::Error, error });
+            self.sender.push(AssistantMessageEvent::Error { reason: StopReason::Error, error: error.into() });
         }
     }
 }

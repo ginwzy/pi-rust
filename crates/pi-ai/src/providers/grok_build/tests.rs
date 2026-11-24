@@ -79,7 +79,7 @@ async fn replayed_items_lose_ids_and_tools_are_not_strict() {
         ..Tool::default()
     };
     let context = Context {
-        messages: vec![Message::user("hi"), Message::Assistant(assistant), Message::user("again")],
+        messages: vec![Message::user("hi"), Message::from(assistant), Message::user("again")],
         tools: vec![tool],
         ..Context::default()
     };

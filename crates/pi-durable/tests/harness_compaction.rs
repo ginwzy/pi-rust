@@ -52,13 +52,13 @@ fn text(label: &str, tokens: usize) -> String {
 }
 
 fn user(content: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(content.into()), timestamp: 0 })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(content.into()), timestamp: 0 })
 }
 
 fn assistant(content: &str, calls: &[&str], stop_reason: StopReason) -> Message {
     let mut blocks = vec![ContentBlock::text(content)];
     blocks.extend(calls.iter().map(|id| faux_tool_call_with_id("read", json!({}), *id)));
-    Message::Assistant(faux_assistant_message(blocks, FauxMessageOptions::stop_reason(stop_reason)))
+    Message::from(faux_assistant_message(blocks, FauxMessageOptions::stop_reason(stop_reason)))
 }
 
 fn answer_text(content: &str) -> Message {
@@ -66,7 +66,7 @@ fn answer_text(content: &str) -> Message {
 }
 
 fn tool_result(call_id: &str, content: &str) -> Message {
-    Message::ToolResult(ToolResultMessage {
+    Message::from(ToolResultMessage {
         tool_call_id: call_id.into(),
         tool_name: "read".into(),
         content: vec![ContentBlock::text(content)],
@@ -190,7 +190,7 @@ fn never_cuts_at_a_system_entry_or_an_excluded_error_or_aborted_answer() {
     let mut ids = Entries(0);
     let mut sections = pi_ai::JsonObject::new();
     sections.insert("s".into(), json!(text("s", 100)));
-    let system = Message::System(SystemMessage {
+    let system = Message::from(SystemMessage {
         content: UserContent::Text(String::new()),
         sections: Some(sections),
         tools_added: None,
@@ -276,7 +276,7 @@ fn summarizes_an_earlier_summary_marker_first() {
 fn writes_a_transcript_truncates_tool_results_and_omits_system_messages_and_thinking() {
     let mut sections = pi_ai::JsonObject::new();
     sections.insert("s".into(), json!("hidden"));
-    let system = Message::System(SystemMessage {
+    let system = Message::from(SystemMessage {
         content: UserContent::Text(String::new()),
         sections: Some(sections),
         tools_added: None,
@@ -291,7 +291,7 @@ fn writes_a_transcript_truncates_tool_results_and_omits_system_messages_and_thin
         ],
         FauxMessageOptions::default(),
     );
-    let messages = [system, user("hello"), Message::Assistant(reply), tool_result("c", &"y".repeat(2500))];
+    let messages = [system, user("hello"), Message::from(reply), tool_result("c", &"y".repeat(2500))];
     let serialized = serialize_conversation(&messages);
     assert!(!serialized.contains("hidden"));
     assert!(serialized.contains("[User]: hello"));

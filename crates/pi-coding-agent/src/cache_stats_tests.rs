@@ -48,7 +48,7 @@ fn raw(value: Value) -> Entry {
 
 fn entry(id: &str, message: &AssistantMessage) -> Entry {
     raw(
-        json!({"type": "message", "id": id, "parentId": null, "timestamp": "", "message": Message::Assistant(message.clone())}),
+        json!({"type": "message", "id": id, "parentId": null, "timestamp": "", "message": Message::from(message.clone())}),
     )
 }
 

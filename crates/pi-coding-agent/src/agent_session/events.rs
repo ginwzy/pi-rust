@@ -64,7 +64,7 @@ pub enum AgentSessionEvent<'a> {
     },
     /// A session entry appended outside the message flow, as stored.
     EntryAppended {
-        entry: Value,
+        entry: std::sync::Arc<Value>,
     },
     SessionInfoChanged {
         name: Option<String>,
@@ -320,11 +320,11 @@ mod tests {
         partial.content.push(ContentBlock::text("Hel"));
         partial.usage.output = 3;
         let event = AgentEvent::MessageUpdate {
-            message: Message::Assistant(partial.clone()),
+            message: Message::from(partial.clone()),
             assistant_message_event: AssistantMessageEvent::TextDelta {
                 content_index: 0,
                 delta: "lo".into(),
-                partial: partial.clone(),
+                partial: partial.clone().into(),
             },
         };
         let value = AgentSessionEvent::Agent(&event).to_json();
@@ -336,8 +336,8 @@ mod tests {
         partial.content =
             vec![ContentBlock::ToolCall(ToolCall { id: "c1".into(), name: "bash".into(), ..Default::default() })];
         let start = AgentEvent::MessageUpdate {
-            message: Message::Assistant(partial.clone()),
-            assistant_message_event: AssistantMessageEvent::ToolcallStart { content_index: 0, partial },
+            message: Message::from(partial.clone()),
+            assistant_message_event: AssistantMessageEvent::ToolcallStart { content_index: 0, partial: partial.into() },
         };
         let value = AgentSessionEvent::Agent(&start).to_json();
         assert_eq!(

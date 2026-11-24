@@ -182,7 +182,7 @@ async fn request_body_converts_history_tools_and_reasoning() {
     };
     let context = Context {
         system_prompt: Some("Be brief.".into()),
-        messages: vec![Message::user("hi"), Message::Assistant(assistant), Message::ToolResult(result)],
+        messages: vec![Message::user("hi"), Message::from(assistant), Message::from(result)],
         tools: vec![Tool {
             name: "read".into(),
             description: "Read".into(),

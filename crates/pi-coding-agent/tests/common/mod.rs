@@ -8,7 +8,7 @@ use pi_coding_agent::session::{Entry, FileEntry, NewSessionOptions, SessionManag
 use serde_json::{Value, json};
 
 pub fn user(text: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: pi_ai::now_ms() })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: pi_ai::now_ms() })
 }
 
 pub fn usage(input: u64, output: u64, cache_read: u64, cache_write: u64) -> Usage {
@@ -23,7 +23,7 @@ pub fn usage(input: u64, output: u64, cache_read: u64, cache_write: u64) -> Usag
 }
 
 pub fn assistant_with(text: &str, usage: Usage) -> Message {
-    Message::Assistant(AssistantMessage {
+    Message::from(AssistantMessage {
         content: vec![ContentBlock::text(text)],
         api: "anthropic-messages".into(),
         provider: "anthropic".into(),

@@ -108,7 +108,7 @@ impl EmbeddedRuntime {
             anyhow::bail!("Session id is empty or already open");
         }
         let messages = match options.system_prompt.filter(|prompt| !prompt.is_empty()) {
-            Some(prompt) => vec![Message::System(SystemMessage {
+            Some(prompt) => vec![Message::from(SystemMessage {
                 content: UserContent::Text(prompt),
                 sections: None,
                 tools_added: None,

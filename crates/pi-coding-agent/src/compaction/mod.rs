@@ -115,7 +115,7 @@ fn custom_chars(custom: &pi_ai::CustomMessage) -> usize {
             Some(value) => serde_json::from_value::<Vec<ContentBlock>>(value.clone()).map_or(0, |b| blocks_chars(&b)),
             None => 0,
         },
-        "bashExecution" => BashExecutionMessage::from_message(&Message::Custom(custom.clone()))
+        "bashExecution" => BashExecutionMessage::from_message(&Message::from(custom.clone()))
             .map_or(0, |bash| js_len(&bash.command) + js_len(&bash.output)),
         "branchSummary" | "compactionSummary" => custom.str_field("summary").map_or(0, js_len),
         _ => 0,
@@ -207,7 +207,7 @@ pub fn estimate_projected_context_tokens(projection: &SessionProjection, branch:
         }
     }
     let system = pi_ai::transcript::current_system_message(&projection.messages);
-    let mut tokens = system.map(|system| estimate_tokens(&Message::System(system))).unwrap_or(0);
+    let mut tokens = system.map(|system| estimate_tokens(&Message::from(system))).unwrap_or(0);
     tokens += projection.messages.iter().filter(|m| !matches!(m, Message::System(_))).map(estimate_tokens).sum::<u64>();
     ContextUsageEstimate { tokens, usage_tokens: 0, trailing_tokens: tokens, last_usage_index: None }
 }

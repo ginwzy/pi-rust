@@ -14,7 +14,7 @@ use pi_durable::testing::faux::{FauxMessageOptions, faux_assistant_message, faux
 use super::*;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 async fn open(registry: &Arc<Registry>) -> Harness {

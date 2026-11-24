@@ -144,15 +144,15 @@ impl PartialMessage {
     fn apply(&mut self, event: ProxyAssistantMessageEvent) -> Result<Option<AssistantMessageEvent>, String> {
         use ProxyAssistantMessageEvent as Proxy;
         let event = match event {
-            Proxy::Start => AssistantMessageEvent::Start { partial: self.message.clone() },
+            Proxy::Start => AssistantMessageEvent::Start { partial: self.message.clone().into() },
             Proxy::TextStart { content_index } => {
                 self.set_block(content_index, ContentBlock::text(""));
-                AssistantMessageEvent::TextStart { content_index, partial: self.message.clone() }
+                AssistantMessageEvent::TextStart { content_index, partial: self.message.clone().into() }
             }
             Proxy::TextDelta { content_index, delta } => match self.message.content.get_mut(content_index) {
                 Some(ContentBlock::Text { text, .. }) => {
                     text.push_str(&delta);
-                    AssistantMessageEvent::TextDelta { content_index, delta, partial: self.message.clone() }
+                    AssistantMessageEvent::TextDelta { content_index, delta, partial: self.message.clone().into() }
                 }
                 _ => return Err("Received text_delta for non-text content".into()),
             },
@@ -160,7 +160,7 @@ impl PartialMessage {
                 Some(ContentBlock::Text { text, text_signature }) => {
                     *text_signature = content_signature;
                     let content = text.clone();
-                    AssistantMessageEvent::TextEnd { content_index, content, partial: self.message.clone() }
+                    AssistantMessageEvent::TextEnd { content_index, content, partial: self.message.clone().into() }
                 }
                 _ => return Err("Received text_end for non-text content".into()),
             },
@@ -168,12 +168,12 @@ impl PartialMessage {
                 let block =
                     ContentBlock::Thinking { thinking: String::new(), thinking_signature: None, redacted: false };
                 self.set_block(content_index, block);
-                AssistantMessageEvent::ThinkingStart { content_index, partial: self.message.clone() }
+                AssistantMessageEvent::ThinkingStart { content_index, partial: self.message.clone().into() }
             }
             Proxy::ThinkingDelta { content_index, delta } => match self.message.content.get_mut(content_index) {
                 Some(ContentBlock::Thinking { thinking, .. }) => {
                     thinking.push_str(&delta);
-                    AssistantMessageEvent::ThinkingDelta { content_index, delta, partial: self.message.clone() }
+                    AssistantMessageEvent::ThinkingDelta { content_index, delta, partial: self.message.clone().into() }
                 }
                 _ => return Err("Received thinking_delta for non-thinking content".into()),
             },
@@ -182,7 +182,11 @@ impl PartialMessage {
                     Some(ContentBlock::Thinking { thinking, thinking_signature, .. }) => {
                         *thinking_signature = content_signature;
                         let content = thinking.clone();
-                        AssistantMessageEvent::ThinkingEnd { content_index, content, partial: self.message.clone() }
+                        AssistantMessageEvent::ThinkingEnd {
+                            content_index,
+                            content,
+                            partial: self.message.clone().into(),
+                        }
                     }
                     _ => return Err("Received thinking_end for non-thinking content".into()),
                 }
@@ -191,12 +195,12 @@ impl PartialMessage {
                 let call = ToolCall { id, name: tool_name, ..Default::default() };
                 self.set_block(content_index, ContentBlock::ToolCall(call));
                 self.tool_arguments.insert(content_index, ToolCallArgumentsStream::new());
-                AssistantMessageEvent::ToolcallStart { content_index, partial: self.message.clone() }
+                AssistantMessageEvent::ToolcallStart { content_index, partial: self.message.clone().into() }
             }
             Proxy::ToolcallDelta { content_index, delta } => match self.message.content.get_mut(content_index) {
                 Some(ContentBlock::ToolCall(call)) => {
                     call.arguments = self.tool_arguments.entry(content_index).or_default().append(&delta).clone();
-                    AssistantMessageEvent::ToolcallDelta { content_index, delta, partial: self.message.clone() }
+                    AssistantMessageEvent::ToolcallDelta { content_index, delta, partial: self.message.clone().into() }
                 }
                 _ => return Err("Received toolcall_delta for non-toolCall content".into()),
             },
@@ -205,7 +209,11 @@ impl PartialMessage {
                     // The end event carries the complete call, including fields such as `namespace`.
                     *call = tool_call.clone();
                     self.tool_arguments.remove(&content_index);
-                    AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial: self.message.clone() }
+                    AssistantMessageEvent::ToolcallEnd {
+                        content_index,
+                        tool_call,
+                        partial: self.message.clone().into(),
+                    }
                 }
                 _ => return Ok(None),
             },
@@ -215,7 +223,7 @@ impl PartialMessage {
                 if provider_thinking_level.is_some() {
                     self.message.provider_thinking_level = provider_thinking_level;
                 }
-                AssistantMessageEvent::Done { reason, message: self.message.clone() }
+                AssistantMessageEvent::Done { reason, message: self.message.clone().into() }
             }
             Proxy::Error { reason, error_message, usage, provider_thinking_level } => {
                 self.message.stop_reason = reason;
@@ -224,7 +232,7 @@ impl PartialMessage {
                 if provider_thinking_level.is_some() {
                     self.message.provider_thinking_level = provider_thinking_level;
                 }
-                AssistantMessageEvent::Error { reason, error: self.message.clone() }
+                AssistantMessageEvent::Error { reason, error: self.message.clone().into() }
             }
         };
         Ok(Some(event))
@@ -233,7 +241,7 @@ impl PartialMessage {
     fn fail(&mut self, sender: &EventSender, reason: StopReason, message: String) {
         self.message.stop_reason = reason;
         self.message.error_message = Some(message);
-        sender.push(AssistantMessageEvent::Error { reason, error: self.message.clone() });
+        sender.push(AssistantMessageEvent::Error { reason, error: self.message.clone().into() });
     }
 }
 

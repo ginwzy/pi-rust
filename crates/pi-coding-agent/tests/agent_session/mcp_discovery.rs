@@ -243,7 +243,7 @@ async fn lists_a_server_before_it_connects_and_appends_its_summary_with_the_next
         .iter()
         .enumerate()
         .filter_map(|(index, message)| match message {
-            Message::System(system) => Some((index, system)),
+            Message::System(system) => Some((index, system.as_ref())),
             _ => None,
         })
         .collect();

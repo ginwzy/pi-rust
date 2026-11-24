@@ -2,6 +2,7 @@
 //! TypeScript pi packages, so session files stay readable by both implementations.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde::de::Error as _;
 use serde::ser::SerializeMap;
@@ -346,15 +347,44 @@ impl CustomMessage {
     }
 }
 
-/// Messages are moved and matched everywhere, so variants stay unboxed.
-#[allow(clippy::large_enum_variant)]
+/// An immutable message shared by the session, execution, and provider layers.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
+    System(Arc<SystemMessage>),
+    User(Arc<UserMessage>),
+    Assistant(Arc<AssistantMessage>),
+    ToolResult(Arc<ToolResultMessage>),
+    Custom(Arc<CustomMessage>),
+}
+
+macro_rules! message_from {
+    ($($variant:ident($body:ty)),+ $(,)?) => {$(
+        impl From<$body> for Message {
+            fn from(message: $body) -> Self {
+                Self::$variant(Arc::new(message))
+            }
+        }
+
+        impl From<Arc<$body>> for Message {
+            fn from(message: Arc<$body>) -> Self {
+                Self::$variant(message)
+            }
+        }
+    )+};
+}
+
+message_from!(
     System(SystemMessage),
     User(UserMessage),
     Assistant(AssistantMessage),
     ToolResult(ToolResultMessage),
-    Custom(CustomMessage),
+    Custom(CustomMessage)
+);
+
+#[cfg(test)]
+#[test]
+fn message_is_two_words() {
+    assert_eq!(std::mem::size_of::<Message>(), 2 * std::mem::size_of::<usize>());
 }
 
 #[derive(Serialize)]
@@ -386,10 +416,10 @@ impl KnownRole {
 
     fn decode<'de, D: serde::Deserializer<'de>>(self, object: D) -> Result<Message, D::Error> {
         match self {
-            Self::System => SystemMessage::deserialize(object).map(Message::System),
-            Self::User => UserMessage::deserialize(object).map(Message::User),
-            Self::Assistant => AssistantMessage::deserialize(object).map(Message::Assistant),
-            Self::ToolResult => ToolResultMessage::deserialize(object).map(Message::ToolResult),
+            Self::System => SystemMessage::deserialize(object).map(Message::from),
+            Self::User => UserMessage::deserialize(object).map(Message::from),
+            Self::Assistant => AssistantMessage::deserialize(object).map(Message::from),
+            Self::ToolResult => ToolResultMessage::deserialize(object).map(Message::from),
         }
     }
 }
@@ -428,7 +458,7 @@ impl<'de> Deserialize<'de> for Message {
         let Some(Value::String(role)) = object.shift_remove("role") else {
             return Err(D::Error::missing_field("role"));
         };
-        Ok(Self::Custom(CustomMessage { role, fields: object }))
+        Ok(CustomMessage { role, fields: object }.into())
     }
 }
 
@@ -445,13 +475,13 @@ impl Message {
                     .filter(|(key, _)| *key != "role")
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
-                Ok(Self::Custom(CustomMessage::new(role, fields)))
+                Ok(CustomMessage::new(role, fields).into())
             }
         }
     }
 
     pub fn user(text: impl Into<String>) -> Self {
-        Self::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: now_ms() })
+        UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: now_ms() }.into()
     }
 
     pub fn role(&self) -> &str {
@@ -669,7 +699,7 @@ mod tests {
         assert_eq!(Message::from_value(&value).unwrap(), message);
         assert_eq!(serde_json::to_string(&message).unwrap(), expected);
         let Message::Custom(custom) = &mut message else { panic!("expected custom") };
-        custom.fields.insert("role".into(), Value::String("ignored".into()));
+        Arc::make_mut(custom).fields.insert("role".into(), Value::String("ignored".into()));
         assert_eq!(serde_json::to_string(&message).unwrap(), expected);
     }
 
@@ -705,7 +735,7 @@ mod tests {
             r#"{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[{"type":"image","data":"AA==","mimeType":"image/png"}],"isError":false,"timestamp":3}"#,
         )
         .unwrap();
-        assert!(matches!(result, Message::ToolResult(ToolResultMessage { is_error: false, .. })));
+        assert!(matches!(result, Message::ToolResult(result) if !result.is_error));
         let custom: Message =
             serde_json::from_str(r#"{"role":"bashExecution","command":"ls","output":"a","exitCode":0,"timestamp":4}"#)
                 .unwrap();

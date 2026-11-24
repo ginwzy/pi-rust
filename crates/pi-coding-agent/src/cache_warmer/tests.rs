@@ -59,7 +59,7 @@ fn done(model: &Model, stop_reason: StopReason) -> AssistantMessageEventStream {
     let mut message = AssistantMessage::empty(model);
     message.usage = warm_usage();
     message.stop_reason = stop_reason;
-    sender.push(pi_ai::AssistantMessageEvent::Done { reason: stop_reason, message });
+    sender.push(pi_ai::AssistantMessageEvent::Done { reason: stop_reason, message: message.into() });
     stream
 }
 
@@ -338,7 +338,7 @@ async fn aborts_replaced_requests_and_skips_failed_refreshes() {
                 }
                 let mut message = AssistantMessage::empty(&model);
                 message.usage = warm_usage();
-                sender.push(pi_ai::AssistantMessageEvent::Done { reason: StopReason::Length, message });
+                sender.push(pi_ai::AssistantMessageEvent::Done { reason: StopReason::Length, message: message.into() });
             });
             stream
         }),

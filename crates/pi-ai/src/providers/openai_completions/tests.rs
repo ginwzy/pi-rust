@@ -147,7 +147,7 @@ fn history(model_id: &str) -> Vec<Message> {
         ..Default::default()
     };
     vec![
-        Message::User(UserMessage {
+        Message::from(UserMessage {
             input_id: None,
             content: UserContent::Blocks(vec![
                 ContentBlock::text("Look"),
@@ -155,7 +155,7 @@ fn history(model_id: &str) -> Vec<Message> {
             ]),
             timestamp: 1,
         }),
-        Message::Assistant(AssistantMessage {
+        Message::from(AssistantMessage {
             content: vec![
                 ContentBlock::Thinking {
                     thinking: "hmm".into(),
@@ -176,7 +176,7 @@ fn history(model_id: &str) -> Vec<Message> {
             duration_ms: None,
             ..Default::default()
         }),
-        Message::ToolResult(ToolResultMessage {
+        Message::from(ToolResultMessage {
             tool_call_id: "call_1".into(),
             tool_name: "read".into(),
             content: vec![

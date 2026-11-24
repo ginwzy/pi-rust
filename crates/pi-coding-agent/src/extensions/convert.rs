@@ -218,31 +218,43 @@ pub(crate) fn event_from_json(value: &Value) -> Option<AssistantMessageEvent> {
     let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
     let reason = || serde_json::from_value::<StopReason>(value["reason"].clone()).unwrap_or(StopReason::Stop);
     Some(match value["type"].as_str()? {
-        "start" => AssistantMessageEvent::Start { partial: partial()? },
-        "text_start" => AssistantMessageEvent::TextStart { content_index: index()?, partial: partial()? },
-        "text_delta" => {
-            AssistantMessageEvent::TextDelta { content_index: index()?, delta: text("delta"), partial: partial()? }
+        "start" => AssistantMessageEvent::Start { partial: partial()?.into() },
+        "text_start" => AssistantMessageEvent::TextStart { content_index: index()?, partial: partial()?.into() },
+        "text_delta" => AssistantMessageEvent::TextDelta {
+            content_index: index()?,
+            delta: text("delta"),
+            partial: partial()?.into(),
+        },
+        "text_end" => AssistantMessageEvent::TextEnd {
+            content_index: index()?,
+            content: text("content"),
+            partial: partial()?.into(),
+        },
+        "thinking_start" => {
+            AssistantMessageEvent::ThinkingStart { content_index: index()?, partial: partial()?.into() }
         }
-        "text_end" => {
-            AssistantMessageEvent::TextEnd { content_index: index()?, content: text("content"), partial: partial()? }
-        }
-        "thinking_start" => AssistantMessageEvent::ThinkingStart { content_index: index()?, partial: partial()? },
-        "thinking_delta" => {
-            AssistantMessageEvent::ThinkingDelta { content_index: index()?, delta: text("delta"), partial: partial()? }
-        }
+        "thinking_delta" => AssistantMessageEvent::ThinkingDelta {
+            content_index: index()?,
+            delta: text("delta"),
+            partial: partial()?.into(),
+        },
         "thinking_end" => AssistantMessageEvent::ThinkingEnd {
             content_index: index()?,
             content: text("content"),
-            partial: partial()?,
+            partial: partial()?.into(),
         },
-        "toolcall_start" => AssistantMessageEvent::ToolcallStart { content_index: index()?, partial: partial()? },
-        "toolcall_delta" => {
-            AssistantMessageEvent::ToolcallDelta { content_index: index()?, delta: text("delta"), partial: partial()? }
+        "toolcall_start" => {
+            AssistantMessageEvent::ToolcallStart { content_index: index()?, partial: partial()?.into() }
         }
+        "toolcall_delta" => AssistantMessageEvent::ToolcallDelta {
+            content_index: index()?,
+            delta: text("delta"),
+            partial: partial()?.into(),
+        },
         "toolcall_end" => AssistantMessageEvent::ToolcallEnd {
             content_index: index()?,
             tool_call: serde_json::from_value(value["toolCall"].clone()).ok()?,
-            partial: partial()?,
+            partial: partial()?.into(),
         },
         "done" => AssistantMessageEvent::Done {
             reason: reason(),

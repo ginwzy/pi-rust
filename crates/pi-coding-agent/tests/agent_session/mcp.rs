@@ -113,7 +113,7 @@ text(JSON.stringify({
     assert_eq!(s.fake.calls(), [r#"search:{"query":"mcp"}"#, r#"search:{"query":"pi"}"#, "fail:{}", "shot:{}"]);
 
     // Nested calls run through the tool pipeline and are recorded on the codemode result.
-    let nested = result.nested_calls.expect("nested calls");
+    let nested = result.nested_calls.as_ref().expect("nested calls");
     let names: Vec<&str> = nested.calls.iter().map(|call| call.name.as_str()).collect();
     assert_eq!(names, ["mcp__docs__search", "mcp__docs__search", "mcp__docs__fail", "mcp__docs__shot"]);
     assert!(nested.complete && nested.calls.iter().all(|call| call.id.starts_with("c1/")));

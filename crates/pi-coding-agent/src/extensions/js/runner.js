@@ -270,6 +270,9 @@ export class Runner {
 
 	async emitContext(messages) {
 		const ctx = this.createContext();
+		const snapshots = messages.map((message) => JSON.stringify(message));
+		const originalIndices = new Map(messages.map((message, index) => [message, index]));
+		const snapshotIndices = new Map(snapshots.map((snapshot, index) => [snapshot, index]));
 		let current = messages;
 		for (const { ext, handlers } of snapshot(this.extensions, "context")) {
 			for (const handler of handlers) {
@@ -303,7 +306,15 @@ export class Runner {
 				}
 			}
 		}
-		return current;
+		if (!Array.isArray(current)) return undefined;
+		return current.map((message, index) => {
+			if (!message || typeof message !== "object" || Array.isArray(message)) return null;
+			const snapshot = JSON.stringify(message);
+			const originalIndex = originalIndices.get(message);
+			if (originalIndex !== undefined && snapshots[originalIndex] === snapshot) return originalIndex;
+			if (snapshots[index] === snapshot) return index;
+			return snapshotIndices.get(snapshot) ?? message;
+		});
 	}
 
 	async emitBeforeProviderRequest(payload) {

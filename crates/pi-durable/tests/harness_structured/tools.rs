@@ -55,7 +55,7 @@ pub async fn tasks_of(harness: &Harness, query: TaskQuery) -> Vec<TaskRecord> {
     harness.commit(move |tx| async move { tx.scan_tasks(query, 20, None).await }, &context()).await.unwrap().items
 }
 
-pub fn tool_results(entries: &[EntryRecord]) -> Vec<pi_ai::ToolResultMessage> {
+pub fn tool_results(entries: &[EntryRecord]) -> Vec<Arc<pi_ai::ToolResultMessage>> {
     let results = entries.iter().filter(|entry| entry.kind == "pi.tool-result");
     results
         .filter_map(|entry| match entry.model.as_ref()?.first()? {
@@ -126,8 +126,8 @@ async fn aborts_a_parallel_round_with_its_generation_tools_first_then_the_genera
     harness.abort_task(generation, &context()).await.unwrap();
     let record = submission.wait(&context()).await.unwrap();
     assert_eq!((record.status, record.reason.as_deref()), (SubmissionStatus::Unanswered, Some("aborted")));
-    let ids: Vec<String> =
-        tool_results(&all_entries(&root).await).into_iter().map(|result| result.tool_call_id).collect();
+    let results = tool_results(&all_entries(&root).await);
+    let ids: Vec<&str> = results.iter().map(|result| result.tool_call_id.as_str()).collect();
     assert_eq!(ids, ["c1", "c2"]);
     assert_eq!(serde_json::to_value(live(&harness, &root).await).unwrap(), json!({}));
     assert_eq!(outcome_of(&harness, generation).await, "aborted");

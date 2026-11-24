@@ -50,7 +50,7 @@ pub async fn nested_tasks(harness: &Harness) -> Vec<TaskRecord> {
     tasks.items.into_iter().filter(|task| task.input["kind"] == Json::from("nested")).collect()
 }
 
-pub fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
+pub fn results(entries: &[EntryRecord]) -> Vec<Arc<ToolResultMessage>> {
     let messages = entries.iter().filter(|entry| entry.kind == "pi.tool-result");
     messages
         .filter_map(|entry| match entry.model.as_ref()?.first()? {

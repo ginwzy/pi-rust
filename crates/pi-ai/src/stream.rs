@@ -18,18 +18,18 @@ use crate::types::{AssistantMessage, ContentBlock, DeferredHandle, JsonObject, M
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum AssistantMessageEvent {
-    Start { partial: AssistantMessage },
-    TextStart { content_index: usize, partial: AssistantMessage },
-    TextDelta { content_index: usize, delta: String, partial: AssistantMessage },
-    TextEnd { content_index: usize, content: String, partial: AssistantMessage },
-    ThinkingStart { content_index: usize, partial: AssistantMessage },
-    ThinkingDelta { content_index: usize, delta: String, partial: AssistantMessage },
-    ThinkingEnd { content_index: usize, content: String, partial: AssistantMessage },
-    ToolcallStart { content_index: usize, partial: AssistantMessage },
-    ToolcallDelta { content_index: usize, delta: String, partial: AssistantMessage },
-    ToolcallEnd { content_index: usize, tool_call: ToolCall, partial: AssistantMessage },
-    Done { reason: StopReason, message: AssistantMessage },
-    Error { reason: StopReason, error: AssistantMessage },
+    Start { partial: Arc<AssistantMessage> },
+    TextStart { content_index: usize, partial: Arc<AssistantMessage> },
+    TextDelta { content_index: usize, delta: String, partial: Arc<AssistantMessage> },
+    TextEnd { content_index: usize, content: String, partial: Arc<AssistantMessage> },
+    ThinkingStart { content_index: usize, partial: Arc<AssistantMessage> },
+    ThinkingDelta { content_index: usize, delta: String, partial: Arc<AssistantMessage> },
+    ThinkingEnd { content_index: usize, content: String, partial: Arc<AssistantMessage> },
+    ToolcallStart { content_index: usize, partial: Arc<AssistantMessage> },
+    ToolcallDelta { content_index: usize, delta: String, partial: Arc<AssistantMessage> },
+    ToolcallEnd { content_index: usize, tool_call: ToolCall, partial: Arc<AssistantMessage> },
+    Done { reason: StopReason, message: Arc<AssistantMessage> },
+    Error { reason: StopReason, error: Arc<AssistantMessage> },
 }
 
 impl AssistantMessageEvent {
@@ -104,13 +104,15 @@ impl AssistantMessageEventStream {
         use futures::StreamExt;
         let mut last = None;
         while let Some(event) = self.next().await {
-            if let Some(message) = event.final_message() {
-                return message.clone();
+            match event {
+                AssistantMessageEvent::Done { message, .. } | AssistantMessageEvent::Error { error: message, .. } => {
+                    return Arc::unwrap_or_clone(message);
+                }
+                event => last = Some(event),
             }
-            last = Some(event);
         }
         let mut message = match last {
-            Some(AssistantMessageEvent::Start { partial }) => partial,
+            Some(AssistantMessageEvent::Start { partial }) => Arc::unwrap_or_clone(partial),
             _ => AssistantMessage::empty(fallback),
         };
         message.stop_reason = StopReason::Error;
@@ -197,7 +199,7 @@ pub fn error_stream(model: &Model, reason: StopReason, error: impl Into<String>)
     let mut message = AssistantMessage::empty(model);
     message.stop_reason = reason;
     message.error_message = Some(error.into());
-    sender.push(AssistantMessageEvent::Error { reason, error: message });
+    sender.push(AssistantMessageEvent::Error { reason, error: Arc::new(message) });
     stream
 }
 
@@ -257,8 +259,12 @@ impl MessageBuilder {
         &mut self.message
     }
 
+    fn freeze(&self) -> Arc<AssistantMessage> {
+        Arc::new(self.message.clone())
+    }
+
     pub fn start(&mut self) {
-        self.sender.push(AssistantMessageEvent::Start { partial: self.message.clone() });
+        self.sender.push(AssistantMessageEvent::Start { partial: self.freeze() });
     }
 
     pub fn text_delta(&mut self, delta: &str) {
@@ -272,8 +278,7 @@ impl MessageBuilder {
                 self.message.content.push(ContentBlock::text(""));
                 let index = self.message.content.len() - 1;
                 self.open = Some(OpenBlock::Text(index));
-                self.sender
-                    .push(AssistantMessageEvent::TextStart { content_index: index, partial: self.message.clone() });
+                self.sender.push(AssistantMessageEvent::TextStart { content_index: index, partial: self.freeze() });
                 index
             }
         };
@@ -283,7 +288,7 @@ impl MessageBuilder {
         self.sender.push(AssistantMessageEvent::TextDelta {
             content_index: index,
             delta: delta.to_string(),
-            partial: self.message.clone(),
+            partial: self.freeze(),
         });
     }
 
@@ -307,7 +312,7 @@ impl MessageBuilder {
         self.sender.push(AssistantMessageEvent::ThinkingDelta {
             content_index: index,
             delta: delta.to_string(),
-            partial: self.message.clone(),
+            partial: self.freeze(),
         });
     }
 
@@ -334,7 +339,7 @@ impl MessageBuilder {
         });
         let index = self.message.content.len() - 1;
         self.open = Some(OpenBlock::Thinking(index));
-        self.sender.push(AssistantMessageEvent::ThinkingStart { content_index: index, partial: self.message.clone() });
+        self.sender.push(AssistantMessageEvent::ThinkingStart { content_index: index, partial: self.freeze() });
         index
     }
 
@@ -346,7 +351,7 @@ impl MessageBuilder {
                 self.sender.push(AssistantMessageEvent::TextEnd {
                     content_index: index,
                     content,
-                    partial: self.message.clone(),
+                    partial: self.freeze(),
                 });
             }
             Some(OpenBlock::Thinking(index)) => {
@@ -357,7 +362,7 @@ impl MessageBuilder {
                 self.sender.push(AssistantMessageEvent::ThinkingEnd {
                     content_index: index,
                     content,
-                    partial: self.message.clone(),
+                    partial: self.freeze(),
                 });
             }
             None => {}
@@ -380,7 +385,7 @@ impl MessageBuilder {
             arguments: ToolCallArgumentsStream::new(),
             ended: false,
         });
-        self.sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: self.message.clone() });
+        self.sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: self.freeze() });
         self.tool_calls.len() - 1
     }
 
@@ -404,7 +409,7 @@ impl MessageBuilder {
         self.sender.push(AssistantMessageEvent::ToolcallDelta {
             content_index,
             delta: delta.to_string(),
-            partial: self.message.clone(),
+            partial: self.freeze(),
         });
     }
 
@@ -443,11 +448,7 @@ impl MessageBuilder {
             call.arguments_error = arguments_error;
         }
         let tool_call = call.clone();
-        self.sender.push(AssistantMessageEvent::ToolcallEnd {
-            content_index,
-            tool_call,
-            partial: self.message.clone(),
-        });
+        self.sender.push(AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial: self.freeze() });
     }
 
     fn end_tool_calls(&mut self) {
@@ -480,7 +481,7 @@ impl MessageBuilder {
         self.message.stop_reason = reason;
         self.message.duration_ms = Some(self.started.elapsed().as_millis() as u64);
         self.finished = true;
-        self.sender.push(AssistantMessageEvent::Done { reason, message: self.message.clone() });
+        self.sender.push(AssistantMessageEvent::Done { reason, message: self.freeze() });
     }
 
     /// Emit `Error` with `reason` `Error` or `Aborted`.
@@ -490,7 +491,7 @@ impl MessageBuilder {
         self.message.error_message = Some(error.into());
         self.message.duration_ms = Some(self.started.elapsed().as_millis() as u64);
         self.finished = true;
-        self.sender.push(AssistantMessageEvent::Error { reason, error: self.message.clone() });
+        self.sender.push(AssistantMessageEvent::Error { reason, error: self.freeze() });
     }
 }
 
@@ -499,7 +500,7 @@ impl Drop for MessageBuilder {
         if !self.finished {
             self.message.stop_reason = StopReason::Error;
             self.message.error_message = Some("Provider stopped before completing the response".into());
-            self.sender.push(AssistantMessageEvent::Error { reason: StopReason::Error, error: self.message.clone() });
+            self.sender.push(AssistantMessageEvent::Error { reason: StopReason::Error, error: self.freeze() });
         }
     }
 }
@@ -634,7 +635,7 @@ mod tests {
         let (sender, mut stream) = event_channel();
         let clone = sender.clone();
         drop(sender);
-        clone.push(AssistantMessageEvent::Start { partial: AssistantMessage::empty(&model()) });
+        clone.push(AssistantMessageEvent::Start { partial: Arc::new(AssistantMessage::empty(&model())) });
         assert!(matches!(stream.next().await, Some(AssistantMessageEvent::Start { .. })));
         let pending = tokio::time::timeout(std::time::Duration::from_millis(20), stream.next()).await;
         assert!(pending.is_err(), "a live sender keeps the stream open");

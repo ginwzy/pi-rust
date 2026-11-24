@@ -145,7 +145,7 @@ impl RunTrigger {
 fn user_message(text: &str, images: Vec<ContentBlock>) -> Message {
     let mut blocks = vec![ContentBlock::text(text)];
     blocks.extend(images);
-    Message::User(UserMessage { input_id: None, content: UserContent::Blocks(blocks), timestamp: pi_ai::now_ms() })
+    Message::from(UserMessage { input_id: None, content: UserContent::Blocks(blocks), timestamp: pi_ai::now_ms() })
 }
 
 impl AgentSession {
@@ -207,7 +207,7 @@ impl AgentSession {
             };
             let mut message = user_message(&expanded, input_images);
             if let Message::User(user) = &mut message {
-                user.input_id = options.input_id.clone();
+                Arc::make_mut(user).input_id = options.input_id.clone();
                 if let Some(save) = &options.queued_input {
                     save(user, behavior)?;
                 }
@@ -301,7 +301,7 @@ impl AgentSession {
                 let text = if hints.is_empty() { prompt.clone() } else { format!("{prompt}\n\n{}", hints.join("\n")) };
                 let mut message = user_message(&text, images);
                 if let Message::User(user) = &mut message {
-                    user.input_id = input_id.clone();
+                    Arc::make_mut(user).input_id = input_id.clone();
                 }
                 if *from_extension {
                     self.note_extension_prompt(&message);
@@ -316,7 +316,7 @@ impl AgentSession {
         let update = self.prepare_prompt_and_tool_loadout(&prompt_options, current);
         lock(&self.state).run_prompt = Some(prompt_options);
         if let Some(update) = update {
-            messages.insert(0, Message::System(update));
+            messages.insert(0, Message::from(update));
         }
         Ok(messages)
     }
@@ -410,7 +410,7 @@ impl AgentSession {
 
     /// Restore already prepared input without re-running input hooks or starting execution.
     pub fn restore_queued_input(&self, message: UserMessage, behavior: StreamingBehavior) {
-        self.enqueue_user_message(Message::User(message), behavior, false);
+        self.enqueue_user_message(Message::from(message), behavior, false);
     }
 
     fn enqueue_user_message(&self, message: Message, behavior: StreamingBehavior, from_extension: bool) {
@@ -508,7 +508,7 @@ impl AgentSession {
             EntryData::Message(Message::User(user)) if !sent_by_extension(user) => Some(BranchPrompt {
                 entry_id: entry.id().to_string(),
                 parent_id: entry.parent_id().map(String::from),
-                message: user.clone(),
+                message: user.as_ref().clone(),
             }),
             _ => None,
         })

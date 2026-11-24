@@ -21,6 +21,8 @@ use pi_ai::{SystemMessage, ThinkingLevel};
 use serde_json::Value;
 
 pub use self::append::NewCompaction;
+pub(crate) use self::append::PendingEntry;
+use self::context::{CachedProjection, ProjectionCache};
 pub use self::context::{
     Leaf, ProjectedEntry, SessionContext, SessionProjection, build_context_entries, build_session_context,
     build_session_path, build_session_projection, latest_compaction, session_entry_to_context_messages,
@@ -65,6 +67,8 @@ pub struct SessionManager {
     /// Target id to `(label, timestamp of the label change)`.
     labels: HashMap<String, (String, String)>,
     leaf: Option<String>,
+    revision: u64,
+    projection: ProjectionCache,
     /// Ids handed out for messages not appended yet; new ids avoid them.
     reserved: HashSet<String>,
 }
@@ -90,6 +94,8 @@ impl SessionManager {
             by_id: HashMap::new(),
             labels: HashMap::new(),
             leaf: None,
+            revision: 0,
+            projection: ProjectionCache::default(),
             reserved: HashSet::new(),
         }
     }
@@ -263,6 +269,7 @@ impl SessionManager {
         self.by_id.clear();
         self.labels.clear();
         self.leaf = None;
+        self.invalidate_projection();
         self.flushed = false;
         if self.persist {
             let file_timestamp = timestamp.replace([':', '.'], "-");
@@ -297,12 +304,19 @@ impl SessionManager {
     }
 
     pub(crate) fn build_index(&mut self) {
+        self.invalidate_projection();
         self.by_id.clear();
-        self.labels.clear();
         self.leaf = None;
         for (index, entry) in self.entries.iter().enumerate() {
             self.by_id.insert(entry.id().to_string(), index);
             self.leaf = Some(entry.id().to_string());
+        }
+        self.rebuild_labels();
+    }
+
+    fn rebuild_labels(&mut self) {
+        self.labels.clear();
+        for entry in &self.entries {
             if let EntryData::Label { target_id, label } = entry.data() {
                 match label.as_deref().filter(|label| !label.is_empty()) {
                     Some(label) => {
@@ -366,7 +380,14 @@ impl SessionManager {
 
     pub(crate) fn append_entry(&mut self, entry: Entry) -> anyhow::Result<String> {
         let id = entry.id().to_string();
-        self.by_id.insert(id.clone(), self.entries.len());
+        let index = self.entries.len();
+        let previous = self.by_id.insert(id.clone(), index);
+        self.bump_revision();
+        if previous.is_none()
+            && let Some(cached) = self.projection.0.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            cached.append(self.revision, &entry, index);
+        }
         self.entries.push(entry);
         self.leaf = Some(id.clone());
         self.persist_entry(self.entries.len() - 1)?;
@@ -446,12 +467,61 @@ impl SessionManager {
         self.leaf.as_deref()
     }
 
+    /// Revision of the stored history and its active branch.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.checked_add(1).expect("session revision overflow");
+    }
+
+    fn invalidate_projection(&mut self) {
+        self.bump_revision();
+        *self.projection.0.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    fn with_projection<R>(&self, use_cache: impl FnOnce(&CachedProjection) -> R) -> R {
+        let mut cache = self.projection.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.as_ref().is_none_or(|cached| cached.revision != self.revision) {
+            *cache = Some(CachedProjection::rebuild(
+                self.get_branch(None),
+                self.revision,
+                self.leaf.clone(),
+                &self.by_id,
+                cache.as_ref(),
+            ));
+        }
+        use_cache(cache.as_ref().unwrap())
+    }
+
     pub fn leaf_entry(&self) -> Option<&Entry> {
         self.leaf.as_deref().and_then(|id| self.get_entry(id))
     }
 
     pub fn get_entry(&self, id: &str) -> Option<&Entry> {
         self.by_id.get(id).map(|index| &self.entries[*index])
+    }
+
+    /// Replace a stored entry's fields without changing its identity or place in the tree.
+    pub fn replace_entry(&mut self, entry: Entry) -> anyhow::Result<()> {
+        let Some(&index) = self.by_id.get(entry.id()) else {
+            anyhow::bail!("Entry {} not found", entry.id());
+        };
+        let previous = &self.entries[index];
+        anyhow::ensure!(entry.parent_id() == previous.parent_id(), "Cannot change the parent of a stored entry");
+        let labels_changed = entry.kind() == "label" || previous.kind() == "label";
+        self.entries[index] = entry;
+        self.bump_revision();
+        if labels_changed {
+            self.rebuild_labels();
+        }
+        if self.flushed {
+            self.rewrite_file()?;
+        } else {
+            self.persist_entry(index)?;
+        }
+        Ok(())
     }
 
     pub fn get_label(&self, id: &str) -> Option<&str> {
@@ -492,24 +562,43 @@ impl SessionManager {
 
     /// Model context with provenance: which entry produced each message.
     pub fn build_session_projection(&self) -> SessionProjection<'_> {
-        context::project_path(self.get_branch(None))
+        self.with_projection(|cached| cached.project(&self.entries))
     }
 
     /// The finalized model context for the current leaf.
     pub fn build_session_context(&self) -> SessionContext {
-        context::build_context_of_path(self.get_branch(None))
+        self.with_projection(|cached| cached.context.clone())
+    }
+
+    pub(crate) fn project_overlay<'a>(&'a self, overlay: &'a [Entry]) -> SessionProjection<'a> {
+        if overlay.is_empty() {
+            return self.build_session_projection();
+        }
+        let mut path = self.get_branch(None);
+        path.extend(overlay);
+        self.with_projection(|cached| cached.overlay(path))
     }
 
     pub fn has_context_messages(&self) -> bool {
+        if let Some(has_messages) = self.read_current_projection(|cached| !cached.context.messages.is_empty()) {
+            return has_messages;
+        }
         context::has_context_messages(self.get_branch(None))
     }
 
     pub fn context_settings(&self) -> (Option<(String, String)>, Option<ThinkingLevel>) {
-        context::context_settings(&self.get_branch(None))
+        self.read_current_projection(|cached| (cached.context.model.clone(), cached.context.thinking_level))
+            .unwrap_or_else(|| context::context_settings(&self.get_branch(None)))
     }
 
     pub fn current_system_message(&self) -> Option<SystemMessage> {
-        context::current_system_message(self.get_branch(None))
+        self.read_current_projection(|cached| pi_ai::transcript::current_system_message(&cached.context.messages))
+            .unwrap_or_else(|| context::current_system_message(self.get_branch(None)))
+    }
+
+    fn read_current_projection<R>(&self, read: impl FnOnce(&CachedProjection) -> R) -> Option<R> {
+        let cache = self.projection.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.as_ref().filter(|cached| cached.revision == self.revision).map(read)
     }
 
     /// Alias of [`Self::build_session_context`].

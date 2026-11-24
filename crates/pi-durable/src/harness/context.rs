@@ -319,7 +319,7 @@ pub fn order_tool_results(messages: &[Message]) -> Vec<Message> {
 }
 
 fn missing_result(call: &ToolCall, timestamp: i64) -> Message {
-    Message::ToolResult(ToolResultMessage {
+    Message::from(ToolResultMessage {
         tool_call_id: call.id.clone(),
         tool_name: call.name.clone(),
         content: vec![ContentBlock::text(MISSING_RESULT_TEXT)],

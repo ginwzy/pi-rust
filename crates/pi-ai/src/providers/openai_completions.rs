@@ -38,7 +38,7 @@ use crate::providers::github_copilot::copilot_dynamic_headers;
 use crate::registry::{ApiProvider, CacheRetention, StreamOptions};
 use crate::simple_options::resolve_cache_retention;
 use crate::stream::{AssistantMessageEventStream, error_stream};
-use crate::transcript::{declared_tools, normalize_context, resolve_transcript};
+use crate::transcript::{collapse_system_messages, declared_tools, normalize_context};
 use crate::types::{Context, Message, Model, StopReason};
 
 pub struct OpenAICompletions;
@@ -57,10 +57,16 @@ impl ApiProvider for OpenAICompletions {
         }
         let compat = Compat::resolve(model);
         let normalized = normalize_context(context);
-        let messages = resolve_transcript(normalized.clone(), compat.supports_mid_convo_system_messages);
-        let grammar = grammar_tool_input_properties(&declared_tools(&messages), compat.supports_openai_grammar_tools);
+        let collapsed;
+        let messages = if compat.supports_mid_convo_system_messages {
+            &normalized
+        } else {
+            collapsed = collapse_system_messages(&normalized);
+            &collapsed
+        };
+        let grammar = grammar_tool_input_properties(&declared_tools(messages), compat.supports_openai_grammar_tools);
         let body = grammar.and_then(|grammar| {
-            let input = BodyInput { messages: &messages, estimate: &normalized, grammar: &grammar };
+            let input = BodyInput { messages, estimate: &normalized, grammar: &grammar };
             Ok((build_body(model, &input, &options, &compat)?, grammar))
         });
         let (body, grammar) = match body {
@@ -71,7 +77,7 @@ impl ApiProvider for OpenAICompletions {
         if let Some(key) = api_key {
             defaults.push(("authorization", format!("Bearer {key}")));
         }
-        let overrides = header_overrides(model, &messages, &options, &compat);
+        let overrides = header_overrides(model, messages, &options, &compat);
         let request = HttpRequest {
             url: endpoint(&model.base_url, "/chat/completions"),
             headers: header_map_with(defaults, overrides, model, &options),

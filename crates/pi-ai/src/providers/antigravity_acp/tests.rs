@@ -208,8 +208,8 @@ async fn pi_runs_bridged_tool_calls_and_the_turn_continues() {
         content: vec![ContentBlock::text("file body")],
         ..ToolResultMessage::default()
     };
-    context.messages.push(Message::Assistant(AssistantMessage { api: API.into(), ..first.clone() }));
-    context.messages.push(Message::ToolResult(result));
+    context.messages.push(Message::from(AssistantMessage { api: API.into(), ..first.clone() }));
+    context.messages.push(Message::from(result));
     let (_, second) = collect(AntigravityAcp.stream(&model, &context, options("tools"))).await;
     assert_eq!((second.stop_reason, second.error_message.as_deref()), (StopReason::Stop, None));
     assert_eq!(second.content.iter().filter_map(ContentBlock::as_text).collect::<String>(), "read: file body");

@@ -52,7 +52,7 @@ pub fn declare_tool_changes(context: &AgentContext, pending: Vec<Message>) -> Ve
     if let Some(index) = system_index
         && let Message::System(system) = &pending[index]
     {
-        baseline[index] = Message::System(with_tool_changes(system, Vec::new(), Vec::new()));
+        baseline[index] = Message::from(with_tool_changes(system, Vec::new(), Vec::new()));
     }
     let declared = declared_tools(context.messages.iter().chain(baseline.iter()));
     let executable: Vec<Tool> = context.tools.iter().map(|tool| tool.declaration()).collect();
@@ -67,7 +67,7 @@ pub fn declare_tool_changes(context: &AgentContext, pending: Vec<Message>) -> Ve
         if unchanged && declares_nothing {
             return pending;
         }
-        baseline[index] = Message::System(with_tool_changes(system, added, removed));
+        baseline[index] = Message::from(with_tool_changes(system, added, removed));
         return baseline;
     }
     if unchanged {
@@ -80,7 +80,7 @@ pub fn declare_tool_changes(context: &AgentContext, pending: Vec<Message>) -> Ve
         tools_removed: None,
         timestamp: now_ms(),
     };
-    let update = Message::System(with_tool_changes(&empty, added, removed));
+    let update = Message::from(with_tool_changes(&empty, added, removed));
     let index = pending.iter().position(|message| !matches!(message, Message::System(_))).unwrap_or(pending.len());
     let mut messages = pending;
     messages.insert(index, update);
@@ -101,7 +101,7 @@ pub fn hide_tool_declarations(messages: Vec<Message>, hidden: &[String]) -> Vec<
                 let added: Vec<Tool> = system.tools_added.iter().flatten().filter(|t| keep(&t.name)).cloned().collect();
                 let removed: Vec<ToolReference> =
                     system.tools_removed.iter().flatten().filter(|t| keep(&t.name)).cloned().collect();
-                Message::System(with_tool_changes(&system, added, removed))
+                Message::from(with_tool_changes(&system, added, removed))
             }
             message => message,
         })

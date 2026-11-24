@@ -50,7 +50,7 @@ fn image(data: &str) -> ContentBlock {
 #[tokio::test]
 async fn serializes_sdk_payloads_to_the_wire_format() {
     let server = MockHttp::start(vec![sse(&[terminal("stop")]).header("x-request-id", "request-1")]).await;
-    let user = Message::User(UserMessage {
+    let user = Message::from(UserMessage {
         input_id: None,
         content: UserContent::Blocks(vec![ContentBlock::text("describe"), image("aGVsbG8=")]),
         timestamp: 1,
@@ -137,7 +137,7 @@ async fn replays_thinking_tool_calls_and_tool_results() {
         arguments: json!({"query": "pi"}).as_object().unwrap().clone(),
         ..ToolCall::default()
     };
-    let assistant = Message::Assistant(AssistantMessage {
+    let assistant = Message::from(AssistantMessage {
         content: vec![
             ContentBlock::Thinking { thinking: "reason".into(), thinking_signature: None, redacted: false },
             ContentBlock::text("answer"),
@@ -149,7 +149,7 @@ async fn replays_thinking_tool_calls_and_tool_results() {
         stop_reason: StopReason::ToolUse,
         ..AssistantMessage::default()
     });
-    let result = Message::ToolResult(ToolResultMessage {
+    let result = Message::from(ToolResultMessage {
         tool_call_id: "abc123456".into(),
         tool_name: "lookup".into(),
         content: vec![ContentBlock::text("found"), image("aGVsbG8=")],

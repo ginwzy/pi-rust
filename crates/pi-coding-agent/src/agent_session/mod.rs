@@ -98,7 +98,7 @@ pub(crate) struct RunState {
     pub retry_sleep: Option<CancellationToken>,
     pub overflow_recovery_attempted: bool,
     /// The latest assistant message of the run and its session entry.
-    pub last_assistant: Option<(AssistantMessage, Option<String>)>,
+    pub last_assistant: Option<(Arc<AssistantMessage>, Option<String>)>,
     /// The entry id reserved for the assistant message being streamed.
     pub streaming_entry: Option<String>,
     pub turn_tool_results: Vec<String>,
@@ -111,7 +111,7 @@ pub(crate) struct RunState {
     /// Prompt options of the active run.
     pub run_prompt: Option<BuildSystemPromptOptions>,
     /// The failed response the next request retries (upstream `_failedResponse`).
-    pub failed_response: Option<AssistantMessage>,
+    pub failed_response: Option<Arc<AssistantMessage>>,
     /// Why routing the current request failed; its stream ends with this error.
     pub route_failure: Option<String>,
     /// A `session_before_compact` handler cancelled the running compaction.
@@ -312,8 +312,7 @@ impl AgentSession {
     }
 
     pub(crate) fn emit_entry(&self, entry_id: &str) {
-        let entry =
-            self.session_manager().get_entry(entry_id).map(|entry| serde_json::Value::Object(entry.raw().clone()));
+        let entry = self.session_manager().get_entry(entry_id).map(crate::session::Entry::shared_raw);
         if let Some(entry) = entry {
             self.emit(&AgentSessionEvent::EntryAppended { entry });
         }

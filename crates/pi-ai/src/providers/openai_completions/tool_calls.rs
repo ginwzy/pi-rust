@@ -104,7 +104,7 @@ impl ToolCalls {
         }
         let delta = self.apply_input(builder, slot, call)?;
         let partial = builder.message().clone();
-        sender.push(AssistantMessageEvent::ToolcallDelta { content_index, delta, partial });
+        sender.push(AssistantMessageEvent::ToolcallDelta { content_index, delta, partial: partial.into() });
         Ok(())
     }
 
@@ -161,7 +161,7 @@ impl ToolCalls {
         if let Some(id) = id {
             self.by_id.insert(id.to_string(), slot);
         }
-        sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: builder.message().clone() });
+        sender.push(AssistantMessageEvent::ToolcallStart { content_index, partial: builder.message().clone().into() });
         slot
     }
 
@@ -181,14 +181,14 @@ impl ToolCalls {
                 block.arguments = JsonObject::from_iter([(custom.property.clone(), json!(custom.buffer.input))]);
                 if let Some(delta) = delta {
                     let partial = builder.message().clone();
-                    sender.push(AssistantMessageEvent::ToolcallDelta { content_index, delta, partial });
+                    sender.push(AssistantMessageEvent::ToolcallDelta { content_index, delta, partial: partial.into() });
                 }
             }
             ToolInput::Json(arguments) => (block.arguments, block.arguments_error) = arguments.finish(),
         }
         let partial = builder.message().clone();
         let ContentBlock::ToolCall(tool_call) = partial.content[content_index].clone() else { return Ok(()) };
-        sender.push(AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial });
+        sender.push(AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial: partial.into() });
         Ok(())
     }
 }

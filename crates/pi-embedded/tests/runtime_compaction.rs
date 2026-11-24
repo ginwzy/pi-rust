@@ -41,7 +41,7 @@ impl Compactor for TestCompactor {
 }
 
 fn user(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 fn compactor(summary: &str) -> TestCompactor {
@@ -199,13 +199,11 @@ async fn rejects_an_ordinary_compactor_failure_and_releases_execution_without_ch
 }
 
 async fn compact_failed_newest(stop_reason: StopReason) {
-    let older = vec![
-        user("older request", 1),
-        Message::Assistant(assistant(vec![ContentBlock::text("completed older answer")])),
-    ];
+    let older =
+        vec![user("older request", 1), Message::from(assistant(vec![ContentBlock::text("completed older answer")]))];
     let mut newest = assistant(vec![ContentBlock::text("partial newest answer")]);
     newest.stop_reason = stop_reason;
-    let latest = vec![user("unfinished request", 2), Message::Assistant(newest)];
+    let latest = vec![user("unfinished request", 2), Message::from(newest)];
     let store = saved([older.clone(), latest.clone()].concat(), InvocationPhase::Pending).await;
     let compactor = compactor("older turn summary");
     let responses = script(vec![answer()], None);
@@ -238,7 +236,7 @@ async fn compacts_the_complete_older_turn_when_the_newest_response_is_error() {
 #[tokio::test]
 async fn preserves_text_array_system_content_and_named_section_updates_after_compaction() {
     let system = |content: UserContent, sections: Value, timestamp| {
-        Message::System(SystemMessage {
+        Message::from(SystemMessage {
             content,
             sections: sections.as_object().cloned(),
             tools_added: None,
@@ -251,7 +249,7 @@ async fn preserves_text_array_system_content_and_named_section_updates_after_com
     let messages = vec![
         system(blocks, json!({"project": "Original project constraint", "removed": "Removed constraint"}), 1),
         user("older request", 2),
-        Message::Assistant(answer()),
+        Message::from(answer()),
         system(UserContent::Text(String::new()), json!({"project": "Use unsaved buffers", "removed": null}), 3),
         user("latest request", 4),
     ];

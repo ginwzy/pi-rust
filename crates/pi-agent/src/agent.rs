@@ -186,7 +186,7 @@ impl Agent {
         if !matches!(messages.first(), Some(Message::System(_)))
             && let Some(system) = create_initial_system_message(initial.system_prompt.as_deref(), &declarations)
         {
-            messages.insert(0, Message::System(system));
+            messages.insert(0, Message::from(system));
         }
         agent.update_state(|state| {
             state.thinking_level = initial.thinking_level;
@@ -204,7 +204,7 @@ impl Agent {
         {
             let mut state = lock(&self.inner.state);
             let baseline = current_system_message(&state.messages);
-            state.messages = baseline.map(Message::System).into_iter().collect();
+            state.messages = baseline.map(Message::from).into_iter().collect();
             state.is_streaming = false;
             state.streaming_message = None;
             state.pending_tool_calls.clear();
@@ -341,7 +341,7 @@ impl Agent {
             blocks.extend(images);
             UserContent::Blocks(blocks)
         };
-        self.prompt_messages(vec![Message::User(UserMessage { input_id: None, content, timestamp: now_ms() })]).await
+        self.prompt_messages(vec![Message::from(UserMessage { input_id: None, content, timestamp: now_ms() })]).await
     }
 
     pub async fn prompt_messages(&self, messages: Vec<Message>) -> anyhow::Result<()> {

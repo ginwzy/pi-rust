@@ -39,7 +39,7 @@ async fn host_functions_return_values_promises_and_errors() {
                 .iter()
                 .map(|arg| match arg {
                     HostValue::Undefined => "undefined",
-                    HostValue::Json(_) => "json",
+                    HostValue::Json(_) | HostValue::RawJson(_) => "json",
                     HostValue::Bytes(_) => "bytes",
                     HostValue::Ref(_) => "ref",
                 })

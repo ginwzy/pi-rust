@@ -98,7 +98,7 @@ pub fn declared_tool_names(session: &AgentSession) -> Vec<String> {
 }
 
 /// The last result of the tool `name`.
-pub fn tool_result(session: &AgentSession, name: &str) -> ToolResultMessage {
+pub fn tool_result(session: &AgentSession, name: &str) -> std::sync::Arc<ToolResultMessage> {
     let mut results = session.messages().into_iter().filter_map(|message| match message {
         Message::ToolResult(result) if result.tool_name == name => Some(result),
         _ => None,

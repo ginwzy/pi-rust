@@ -112,7 +112,7 @@ async fn records_how_long_execute_took_excluding_hooks_and_nothing_for_calls_tha
     let round =
         calls(&[("slow", json!({}), "slow"), ("thrower", json!({}), "thrower"), ("slow", json!({}), "blocked")]);
     let Run { harness, entries, .. } = run(&setup, vec![round, done()]).await;
-    let by_id: HashMap<String, pi_ai::ToolResultMessage> =
+    let by_id: HashMap<String, Arc<pi_ai::ToolResultMessage>> =
         results(&entries).into_iter().map(|result| (result.tool_call_id.clone(), result)).collect();
     for id in ["slow", "thrower"] {
         let duration = by_id[id].duration_ms.unwrap();

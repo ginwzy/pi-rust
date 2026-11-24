@@ -223,7 +223,7 @@ fn preloaded_entries_migrate_only_with_an_old_header() {
 }
 
 fn tool_result(text: &str) -> Message {
-    Message::ToolResult(ToolResultMessage {
+    Message::from(ToolResultMessage {
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         content: vec![ContentBlock::text(text)],

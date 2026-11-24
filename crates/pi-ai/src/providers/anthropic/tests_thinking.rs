@@ -35,7 +35,7 @@ fn context(messages: Vec<Message>) -> Context {
 }
 
 fn assistant(level: Option<&str>, provider: &str) -> Message {
-    Message::Assistant(AssistantMessage {
+    Message::from(AssistantMessage {
         content: vec![
             ContentBlock::Thinking {
                 thinking: "reasoning".into(),

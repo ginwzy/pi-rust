@@ -43,18 +43,24 @@ pub(crate) fn import_frame(specifier: &str, default: bool) -> Map<String, Value>
     frame(json!({ "op": "import", "specifier": specifier, "default": default, "want": "ref" }))
 }
 
-pub(crate) fn call_frame(
+#[derive(serde::Serialize)]
+pub(crate) struct CallFrame<'a> {
+    op: &'static str,
+    target: u64,
+    args: Vec<wire::Argument<'a>>,
+    want: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    method: Option<&'a str>,
+}
+
+pub(crate) fn call_frame<'a>(
     target: &JsRef,
-    method: Option<&str>,
-    args: &[HostValue],
+    method: Option<&'a str>,
+    args: &'a [HostValue],
     want: Want,
-) -> Result<Map<String, Value>, JsError> {
-    let args = wire::encode_all(target.handle(), args)?;
-    let mut map = frame(json!({ "op": "call", "target": target.id(), "args": args, "want": want.name() }));
-    if let Some(method) = method {
-        map.insert("method".into(), json!(method));
-    }
-    Ok(map)
+) -> Result<CallFrame<'a>, JsError> {
+    let args = args.iter().map(|value| wire::argument(target.handle(), value)).collect::<Result<_, _>>()?;
+    Ok(CallFrame { op: "call", target: target.id(), args, want: want.name(), method })
 }
 
 pub(crate) fn get_frame(target: &JsRef, key: &str, want: Want) -> Map<String, Value> {
@@ -70,7 +76,10 @@ pub(crate) fn json_frame(target: &JsRef) -> Map<String, Value> {
     frame(json!({ "op": "json", "target": target.id(), "want": "json" }))
 }
 
-pub(crate) async fn ask(handle: &JsHandle, frame: Result<Map<String, Value>, JsError>) -> Result<HostValue, JsError> {
+pub(crate) async fn ask(
+    handle: &JsHandle,
+    frame: Result<impl serde::Serialize, JsError>,
+) -> Result<HostValue, JsError> {
     let client = handle.node_client().ok_or_else(shut_down)?;
     let (sender, mut receiver) = tokio::sync::oneshot::channel();
     client.send_request(&handle.shared().alive, frame?, Waiter::Async(sender))?;
@@ -94,7 +103,7 @@ pub(crate) async fn ask(handle: &JsHandle, frame: Result<Map<String, Value>, JsE
 /// [`ask`] for synchronous callers; fails on the bridge thread, which must read the reply.
 pub(crate) fn blocking_ask(
     handle: &JsHandle,
-    frame: Result<Map<String, Value>, JsError>,
+    frame: Result<impl serde::Serialize, JsError>,
     timeout: Option<Duration>,
 ) -> Result<HostValue, JsError> {
     handle.refuse_on_js_thread()?;

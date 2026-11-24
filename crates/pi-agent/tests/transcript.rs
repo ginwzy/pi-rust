@@ -163,7 +163,7 @@ async fn pending_declarations_are_rewritten_to_match_the_executable_set() {
         tools_removed: None,
         timestamp: 1,
     };
-    assert_eq!(state.messages[1], Message::System(expected));
+    assert_eq!(state.messages[1], Message::from(expected));
     assert_eq!(names(&declared_tools(&state.messages)), ["first"]);
 }
 

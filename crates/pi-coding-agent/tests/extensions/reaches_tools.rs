@@ -89,7 +89,7 @@ async fn the_tool_listing_reports_reaches_tools_as_upstream_does() {
     assert_eq!(report["serialized"], false, "a function has no JSON form");
 }
 
-fn tool_result(h: &Harness, name: &str) -> ToolResultMessage {
+fn tool_result(h: &Harness, name: &str) -> std::sync::Arc<ToolResultMessage> {
     let mut results = h.session.messages().into_iter().filter_map(|message| match message {
         Message::ToolResult(result) if result.tool_name == name => Some(result),
         _ => None,

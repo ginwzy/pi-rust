@@ -152,7 +152,7 @@ fn image(data: &str) -> ContentBlock {
 #[tokio::test]
 async fn user_messages_drop_empty_text_parts() {
     let model = plain_catalog("openai", "gpt-4o-mini");
-    let user = Message::User(UserMessage {
+    let user = Message::from(UserMessage {
         input_id: None,
         content: UserContent::Blocks(vec![ContentBlock::text(""), image("ZmFrZQ==")]),
         timestamp: 1,
@@ -282,7 +282,7 @@ async fn responses_tool_call_ids_are_shortened_for_chat_completions() {
     let call = ContentBlock::ToolCall(tool_call(&long_id, "read", json!({})));
     let mut source = assistant(&model, vec![call], StopReason::ToolUse);
     if let Message::Assistant(message) = &mut source {
-        message.api = "openai-responses".into();
+        std::sync::Arc::make_mut(message).api = "openai-responses".into();
     }
     let messages = vec![Message::user("go"), source, tool_result(&long_id, "read", vec![ContentBlock::text("ok")])];
     let body = capture(&model, &Context { messages, ..Context::default() }, options()).await;

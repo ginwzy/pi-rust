@@ -165,7 +165,7 @@ async fn finish_tool_round(
         let done = SubmissionSettlement::Done { answer: assistant };
         if let Some(handoff) = handoff {
             // The handoff's reset precedes every queued item, so queued writes and selected steers land in its context.
-            let message = Message::User(UserMessage {
+            let message = Message::from(UserMessage {
                 input_id: None,
                 content: UserContent::Text(handoff),
                 timestamp: now as i64,

@@ -12,6 +12,7 @@ pub(crate) fn encode(handle: &JsHandle, value: &HostValue) -> Result<Value, JsEr
     Ok(match value {
         HostValue::Undefined => json!(["u"]),
         HostValue::Json(value) => json!(["j", value]),
+        HostValue::RawJson(value) => json!(["j", value]),
         HostValue::Bytes(bytes) => json!(["b", STANDARD.encode(bytes)]),
         HostValue::Ref(reference) => {
             if !reference.handle().same_runtime(handle) {
@@ -22,8 +23,18 @@ pub(crate) fn encode(handle: &JsHandle, value: &HostValue) -> Result<Value, JsEr
     })
 }
 
-pub(crate) fn encode_all(handle: &JsHandle, values: &[HostValue]) -> Result<Value, JsError> {
-    values.iter().map(|value| encode(handle, value)).collect::<Result<Vec<_>, _>>().map(Value::Array)
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub(crate) enum Argument<'a> {
+    RawJson((&'static str, &'a serde_json::value::RawValue)),
+    Encoded(Value),
+}
+
+pub(crate) fn argument<'a>(handle: &JsHandle, value: &'a HostValue) -> Result<Argument<'a>, JsError> {
+    match value {
+        HostValue::RawJson(raw) => Ok(Argument::RawJson(("j", raw))),
+        _ => encode(handle, value).map(Argument::Encoded),
+    }
 }
 
 pub(crate) fn decode(handle: &JsHandle, wire: &Value) -> Result<HostValue, JsError> {

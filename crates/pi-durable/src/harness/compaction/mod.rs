@@ -189,14 +189,14 @@ async fn summarize_phase(task: TaskRecord, runtime: TaskRuntime, context: Contex
     let now = runtime.now() as i64;
     let prompt = summary_prompt(&summarized_messages(&view, cut), input.instructions.as_deref());
     let messages = vec![
-        Message::System(SystemMessage {
+        Message::from(SystemMessage {
             content: UserContent::Text(SUMMARIZATION_SYSTEM_PROMPT.into()),
             sections: None,
             tools_added: None,
             tools_removed: None,
             timestamp: now,
         }),
-        Message::User(UserMessage {
+        Message::from(UserMessage {
             input_id: None,
             content: UserContent::Blocks(vec![ContentBlock::text(prompt)]),
             timestamp: now,
@@ -376,7 +376,7 @@ async fn place_summary(
         timestamp: runtime.now() as i64,
     };
     let entry = EntryDraft {
-        model: Some(vec![Message::User(message)]),
+        model: Some(vec![Message::from(message)]),
         data: Some(Json::from(data)),
         head: Some(DraftHead::Entry(first_kept)),
         ..EntryDraft::new(COMPACTION_ENTRY.kind())

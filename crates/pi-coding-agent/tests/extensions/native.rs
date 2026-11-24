@@ -404,6 +404,57 @@ async fn agent_before_settle_results_append_entries() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn boundary_previews_are_isolated_from_saved_history_reads() {
+    let source = r#"export default function(pi) {
+        pi.on("agent_before_settle", (event, ctx) => {
+            const user = ctx.sessionManager.getBranch().find(entry => entry.message?.role === "user");
+            return {entries: [
+                {type: "context_edit", targetId: user.id, replacement: {content: "edited preview"}},
+                {type: "custom_message", customType: "preview", content: "temporary", display: false}
+            ]};
+        });
+        pi.on("agent_before_settle", (event, ctx) => {
+            const manager = ctx.sessionManager;
+            const text = (message) => typeof message.content === "string" ? message.content : message.content[0].text;
+            const original = manager.getEntries().find(entry => entry.message?.role === "user");
+            const entry = event.context.contextEntries.find(item => item.sourceEntry.customType === "preview");
+            const edited = event.context.contextEntries.find(item => item.sourceEntry.id === original.id);
+            if (!entry || entry.messages[0].content !== "temporary" || edited.messages[0].content !== "edited preview") {
+                throw new Error("preview messages differ");
+            }
+            const checks = {
+                entry: manager.getEntry(entry.sourceEntry.id) === undefined,
+                leaf: manager.getLeafEntry().id !== entry.sourceEntry.id,
+                context: text(manager.buildSessionContext().messages.find(message => message.role === "user")) === "original",
+                sources: manager.buildContextEntries().some(item => item.id === original.id),
+                projection: manager.buildSessionProjection().entries.some(item => item.sourceEntry.id === original.id),
+                tree: manager.getTree().length === 1,
+                header: manager.getHeader().type === "session"
+            };
+            const failed = Object.keys(checks).filter(name => !checks[name]);
+            if (failed.length) throw new Error(`preview changed stored history: ${failed.join(", ")}`);
+            original.message.content = "JS mutation";
+            if (text(manager.getEntry(original.id).message) !== "original") throw new Error("read shared JS state");
+            pi.appendEntry("preview-id", entry.sourceEntry.id);
+            return {entries: []};
+        });
+    }"#;
+    let h = harness(Setup {
+        files: vec![("preview.mjs", source.into())],
+        load: vec!["preview.mjs"],
+        responses: vec![FauxResponse::text("answer")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("original", Vec::new()).await.unwrap();
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let preview_id = entry_data(&h, "preview-id").expect("preview observed");
+    let manager = h.session.session_manager();
+    assert!(manager.get_entry(preview_id.as_str().unwrap()).is_none());
+    assert!(manager.entries().iter().all(|entry| !matches!(entry.kind(), "context_edit" | "custom_message")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn footer_changes_reach_footer_changed_subscribers() {
     let (h, ui) = native(Vec::new()).await;
     eventually(|| ui.widget("native").is_some()).await;

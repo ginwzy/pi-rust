@@ -197,7 +197,7 @@ fn error_event(model: &Model, message: String, aborted: bool, diagnostics: Vec<V
     error.stop_reason = reason;
     error.error_message = Some(message);
     error.diagnostics = diagnostics;
-    AssistantMessageEvent::Error { reason, error }
+    AssistantMessageEvent::Error { reason, error: error.into() }
 }
 
 /// Rebuilds the partial message from wire events.
@@ -246,9 +246,9 @@ impl Converter {
                 self.finish(event);
                 if kind == "error" {
                     self.partial.error_message = event["errorMessage"].as_str().map(str::to_string);
-                    return Some(AssistantMessageEvent::Error { reason, error: self.partial.clone() });
+                    return Some(AssistantMessageEvent::Error { reason, error: self.partial.clone().into() });
                 }
-                return Some(AssistantMessageEvent::Done { reason, message: self.partial.clone() });
+                return Some(AssistantMessageEvent::Done { reason, message: self.partial.clone().into() });
             }
             "text_start" => *self.slot(content_index) = ContentBlock::text(""),
             "thinking_start" => {
@@ -289,22 +289,30 @@ impl Converter {
                 let tool_call: ToolCall = serde_json::from_value(event["toolCall"].clone()).unwrap_or_default();
                 *self.slot(content_index) = ContentBlock::ToolCall(tool_call.clone());
                 let partial = self.partial.clone();
-                return Some(AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial });
+                return Some(AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial: partial.into() });
             }
             "start" => {}
             _ => return None,
         }
         let partial = self.partial.clone();
         Some(match kind {
-            "start" => AssistantMessageEvent::Start { partial },
-            "text_start" => AssistantMessageEvent::TextStart { content_index, partial },
-            "text_delta" => AssistantMessageEvent::TextDelta { content_index, delta: text("delta"), partial },
-            "text_end" => AssistantMessageEvent::TextEnd { content_index, content: text("content"), partial },
-            "thinking_start" => AssistantMessageEvent::ThinkingStart { content_index, partial },
-            "thinking_delta" => AssistantMessageEvent::ThinkingDelta { content_index, delta: text("delta"), partial },
-            "thinking_end" => AssistantMessageEvent::ThinkingEnd { content_index, content: text("content"), partial },
-            "toolcall_start" => AssistantMessageEvent::ToolcallStart { content_index, partial },
-            _ => AssistantMessageEvent::ToolcallDelta { content_index, delta: text("delta"), partial },
+            "start" => AssistantMessageEvent::Start { partial: partial.into() },
+            "text_start" => AssistantMessageEvent::TextStart { content_index, partial: partial.into() },
+            "text_delta" => {
+                AssistantMessageEvent::TextDelta { content_index, delta: text("delta"), partial: partial.into() }
+            }
+            "text_end" => {
+                AssistantMessageEvent::TextEnd { content_index, content: text("content"), partial: partial.into() }
+            }
+            "thinking_start" => AssistantMessageEvent::ThinkingStart { content_index, partial: partial.into() },
+            "thinking_delta" => {
+                AssistantMessageEvent::ThinkingDelta { content_index, delta: text("delta"), partial: partial.into() }
+            }
+            "thinking_end" => {
+                AssistantMessageEvent::ThinkingEnd { content_index, content: text("content"), partial: partial.into() }
+            }
+            "toolcall_start" => AssistantMessageEvent::ToolcallStart { content_index, partial: partial.into() },
+            _ => AssistantMessageEvent::ToolcallDelta { content_index, delta: text("delta"), partial: partial.into() },
         })
     }
 }

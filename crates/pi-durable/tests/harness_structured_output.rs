@@ -74,7 +74,7 @@ async fn nested(setup: &ChatSetup, name: &'static str) -> NestedToolExecutionRes
 }
 
 /// Run `name` as a model-issued call and return its transcript message.
-async fn direct(setup: &ChatSetup, name: &str) -> ToolResultMessage {
+async fn direct(setup: &ChatSetup, name: &str) -> Arc<ToolResultMessage> {
     setup.faux.set_responses([call(name, "c1"), answer("done")]);
     let (harness, root) = open_chat(Arc::new(MemoryStorage::new()), setup).await;
     go(&root).await;

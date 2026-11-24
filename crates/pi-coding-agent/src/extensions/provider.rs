@@ -58,7 +58,7 @@ impl ApiProvider for JsApiProvider {
                 let aborted = options.cancel.is_cancelled();
                 message.stop_reason = if aborted { StopReason::Aborted } else { StopReason::Error };
                 message.error_message = Some(failure.message);
-                sender.push(pi_ai::AssistantMessageEvent::Error { reason: message.stop_reason, error: message });
+                sender.push(pi_ai::AssistantMessageEvent::Error { reason: message.stop_reason, error: message.into() });
             }
         });
         stream

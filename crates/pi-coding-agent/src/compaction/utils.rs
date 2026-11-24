@@ -159,7 +159,7 @@ mod tests {
     use super::*;
 
     fn tool_result(text: &str) -> Message {
-        Message::ToolResult(ToolResultMessage {
+        Message::from(ToolResultMessage {
             tool_call_id: "tc1".into(),
             tool_name: "read".into(),
             content: vec![ContentBlock::text(text)],
@@ -175,7 +175,7 @@ mod tests {
         let short = "x".repeat(1500);
         assert_eq!(serialize_conversation(&[tool_result(&short)]), format!("[Tool result]: {short}"));
         let long = "y".repeat(5000);
-        let user = Message::User(pi_ai::UserMessage {
+        let user = Message::from(pi_ai::UserMessage {
             input_id: None,
             content: UserContent::Blocks(vec![ContentBlock::text(long.clone())]),
             timestamp: 0,
@@ -195,7 +195,7 @@ mod tests {
             ..Default::default()
         });
         let content = vec![thinking, ContentBlock::text("visible reply"), call];
-        let reply = Message::Assistant(pi_ai::AssistantMessage { content, ..Default::default() });
+        let reply = Message::from(pi_ai::AssistantMessage { content, ..Default::default() });
         assert_eq!(
             serialize_conversation(&[reply]),
             "[Assistant]: visible reply\n\n[Assistant tool calls]: read(path=\"a.ts\")"
@@ -213,7 +213,7 @@ mod tests {
             duration_ms: None,
             error: None,
         };
-        let result = Message::ToolResult(ToolResultMessage {
+        let result = Message::from(ToolResultMessage {
             tool_call_id: "codemode-1".into(),
             tool_name: "codemode".into(),
             nested_calls: Some(NestedToolCalls {

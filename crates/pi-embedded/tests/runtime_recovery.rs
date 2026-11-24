@@ -14,12 +14,12 @@ use pi_embedded::{
 use serde_json::json;
 
 fn user(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 #[tokio::test]
 async fn requests_approval_again_for_a_restored_pending_mutation() {
-    let store = saved(vec![Message::Assistant(call("call-1", "tool"))], InvocationPhase::Pending).await;
+    let store = saved(vec![Message::from(call("call-1", "tool"))], InvocationPhase::Pending).await;
     edit_saved(&store, |snapshot| snapshot.invocations[0].approved = Some(true)).await;
     let executions = Arc::new(Mutex::new(0));
     let mut host = host(store, script(vec![answer()], None).stream);
@@ -41,7 +41,7 @@ async fn requests_approval_again_for_a_restored_pending_mutation() {
 #[tokio::test]
 async fn restores_a_partial_response_as_interrupted_and_resumes_without_replaying_it() {
     let store = saved(vec![user("hello", 1)], InvocationPhase::Pending).await;
-    edit_saved(&store, |snapshot| snapshot.partial = Some(assistant(vec![ContentBlock::text("partial")]))).await;
+    edit_saved(&store, |snapshot| snapshot.partial = Some(assistant(vec![ContentBlock::text("partial")]).into())).await;
     let responses = script(vec![answer()], None);
     let session = restore_runtime(host(store, responses.stream.clone())).restore("session").await.unwrap();
     let snapshot = session.snapshot();
@@ -55,7 +55,7 @@ async fn restores_a_partial_response_as_interrupted_and_resumes_without_replayin
 
 #[tokio::test]
 async fn repairs_a_pending_tool_before_requesting_another_response() {
-    let store = saved(vec![Message::Assistant(call("call-1", "tool"))], InvocationPhase::Pending).await;
+    let store = saved(vec![Message::from(call("call-1", "tool"))], InvocationPhase::Pending).await;
     let executions = Arc::new(Mutex::new(0));
     let responses = script(vec![answer()], None);
     let mut host = host(store, responses.stream.clone());
@@ -68,7 +68,7 @@ async fn repairs_a_pending_tool_before_requesting_another_response() {
 
 #[tokio::test]
 async fn restores_a_durable_completed_result_without_repeating_its_tool() {
-    let store = saved(vec![Message::Assistant(call("call-1", "tool"))], InvocationPhase::Completed).await;
+    let store = saved(vec![Message::from(call("call-1", "tool"))], InvocationPhase::Completed).await;
     let executions = Arc::new(Mutex::new(0));
     let mut host = host(store, script(vec![answer()], None).stream);
     host.tools = vec![counted(declaration("tool", ToolEffect::Read), executions.clone())];
@@ -79,7 +79,7 @@ async fn restores_a_durable_completed_result_without_repeating_its_tool() {
 }
 
 async fn reconciliation(completed: bool) {
-    let store = saved(vec![Message::Assistant(call("call-1", "tool"))], InvocationPhase::Executing).await;
+    let store = saved(vec![Message::from(call("call-1", "tool"))], InvocationPhase::Executing).await;
     let executions = Arc::new(Mutex::new(0));
     let mut host = host(store, script(vec![answer()], None).stream);
     host.tools = vec![counted(declaration("tool", ToolEffect::Mutation), executions.clone())];
@@ -162,8 +162,7 @@ async fn interrupts_the_run_without_ending_the_session_when_a_provider_reuses_a_
 
 #[tokio::test]
 async fn snapshots_keep_upstream_json_shapes() {
-    let store =
-        saved(vec![user("hello", 1), Message::Assistant(call("call-1", "tool"))], InvocationPhase::Pending).await;
+    let store = saved(vec![user("hello", 1), Message::from(call("call-1", "tool"))], InvocationPhase::Pending).await;
     let value = serde_json::to_value(store.load("session").await.unwrap().unwrap()).unwrap();
     assert_eq!(value["version"], 1);
     assert_eq!(value["status"], "running");

@@ -254,7 +254,13 @@ impl Entry {
 
     pub(crate) fn build_message(mut fields: Vec<(&str, Option<Value>)>, message: &Message) -> serde_json::Result<Self> {
         fields.push(("message", Some(serde_json::to_value(message)?)));
-        Ok(Self::from_parts(collect_fields(fields), "message".into(), EntryData::Message(message.clone())))
+        let stored = match message {
+            Message::User(user) if user.input_id.is_some() => {
+                pi_ai::UserMessage { input_id: None, content: user.content.clone(), timestamp: user.timestamp }.into()
+            }
+            _ => message.clone(),
+        };
+        Ok(Self::from_parts(collect_fields(fields), "message".into(), EntryData::Message(stored)))
     }
 
     /// The entry `type`, such as `message` or `compaction`.

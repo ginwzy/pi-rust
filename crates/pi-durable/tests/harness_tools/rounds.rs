@@ -14,7 +14,7 @@ use super::support::harness_support::*;
 use super::{Run, add_tool, call_message, calls, done, empty_result, result_text, results, run, tool};
 
 /// The `toolsRemoved` or `toolsAdded` names of the last system entry.
-fn last_system(entries: &[pi_durable::EntryRecord]) -> pi_ai::SystemMessage {
+fn last_system(entries: &[pi_durable::EntryRecord]) -> Arc<pi_ai::SystemMessage> {
     let system = entries.iter().rev().find(|entry| entry.kind == "pi.system").unwrap();
     let Some(Message::System(message)) = system.model.as_ref().and_then(|model| model.first()).cloned() else {
         panic!("expected a system message");
@@ -80,7 +80,8 @@ async fn removes_unregistered_active_tools_from_the_offer_and_adds_them_back_aft
     setup.faux.set_responses([done()]);
     first.root.submit(SubmissionDraft::input("back"), &ctx()).await.unwrap().wait(&ctx()).await.unwrap();
     let entries = all_entries(&first.root).await;
-    let added = last_system(&entries).tools_added.unwrap_or_default();
+    let system = last_system(&entries);
+    let added = system.tools_added.as_deref().unwrap_or_default();
     assert_eq!(added.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(), ["echo"]);
     first.harness.close(&ctx()).await.unwrap();
 }

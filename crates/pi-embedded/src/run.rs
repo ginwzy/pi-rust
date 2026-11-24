@@ -341,7 +341,7 @@ impl EmbeddedSession {
                     timestamp: now_ms(),
                     ..ToolResultMessage::default()
                 };
-                self.on_agent_event(AgentEvent::MessageEnd { message: Message::ToolResult(message) }).await?;
+                self.on_agent_event(AgentEvent::MessageEnd { message: Message::from(message) }).await?;
                 if has_uncertain(self) {
                     anyhow::bail!("Tool outcome requires reconciliation");
                 }

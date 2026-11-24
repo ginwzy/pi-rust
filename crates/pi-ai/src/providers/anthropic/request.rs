@@ -165,7 +165,7 @@ pub(super) fn build_params(params: &Params) -> Result<Built, String> {
     let later_systems: Vec<&SystemMessage> = conversation
         .iter()
         .filter_map(|message| match message {
-            Message::System(system) => Some(system),
+            Message::System(system) => Some(system.as_ref()),
             _ => None,
         })
         .collect();

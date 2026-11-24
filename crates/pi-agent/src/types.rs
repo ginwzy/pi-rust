@@ -217,7 +217,7 @@ pub enum AgentEvent {
     TurnStart,
     TurnEnd {
         message: Message,
-        tool_results: Vec<ToolResultMessage>,
+        tool_results: Vec<Arc<ToolResultMessage>>,
     },
     MessageStart {
         message: Message,

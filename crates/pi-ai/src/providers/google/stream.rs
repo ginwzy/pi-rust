@@ -134,9 +134,9 @@ impl GoogleStream {
         }
         let delta = text.to_string();
         if thinking {
-            out.emit(|partial| AssistantMessageEvent::ThinkingDelta { content_index, delta, partial });
+            out.emit(|partial| AssistantMessageEvent::ThinkingDelta { content_index, delta, partial: partial.into() });
         } else {
-            out.emit(|partial| AssistantMessageEvent::TextDelta { content_index, delta, partial });
+            out.emit(|partial| AssistantMessageEvent::TextDelta { content_index, delta, partial: partial.into() });
         }
     }
 
@@ -155,8 +155,8 @@ impl GoogleStream {
             part["thoughtSignature"].as_str().filter(|signature| !signature.is_empty()).map(str::to_string);
         let tool_call = ToolCall { id, name, arguments, thought_signature, ..ToolCall::default() };
         let content_index = out.open(ContentBlock::ToolCall(tool_call.clone()));
-        out.emit(|partial| AssistantMessageEvent::ToolcallDelta { content_index, delta, partial });
-        out.emit(|partial| AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial });
+        out.emit(|partial| AssistantMessageEvent::ToolcallDelta { content_index, delta, partial: partial.into() });
+        out.emit(|partial| AssistantMessageEvent::ToolcallEnd { content_index, tool_call, partial: partial.into() });
     }
 
     /// Close the open block and return the final stop reason.

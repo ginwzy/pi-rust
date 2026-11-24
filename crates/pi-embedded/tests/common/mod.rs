@@ -98,7 +98,7 @@ pub fn script(responses: Vec<AssistantMessage>, gate: Option<CancellationToken>)
         let mut message = responses.get(index).cloned().unwrap_or_else(answer);
         let (gate, signal) = (gate.clone(), signal.clone());
         tokio::spawn(async move {
-            sender.push(AssistantMessageEvent::Start { partial: message.clone() });
+            sender.push(AssistantMessageEvent::Start { partial: message.clone().into() });
             if index == 0 {
                 signal.cancel();
                 if let Some(gate) = gate {
@@ -108,16 +108,16 @@ pub fn script(responses: Vec<AssistantMessage>, gate: Option<CancellationToken>)
             if options.cancel.is_cancelled() {
                 message.stop_reason = StopReason::Aborted;
                 message.error_message = Some("cancelled".into());
-                sender.push(AssistantMessageEvent::Error { reason: StopReason::Aborted, error: message });
+                sender.push(AssistantMessageEvent::Error { reason: StopReason::Aborted, error: message.into() });
                 return;
             }
             for (content_index, part) in message.content.iter().enumerate() {
                 if let Some(text) = part.as_text() {
                     let (delta, partial) = (text.to_string(), message.clone());
-                    sender.push(AssistantMessageEvent::TextDelta { content_index, delta, partial });
+                    sender.push(AssistantMessageEvent::TextDelta { content_index, delta, partial: partial.into() });
                 }
             }
-            sender.push(AssistantMessageEvent::Done { reason: message.stop_reason, message });
+            sender.push(AssistantMessageEvent::Done { reason: message.stop_reason, message: message.into() });
         });
         events
     });
@@ -206,7 +206,7 @@ pub fn tool_results(messages: &[Message]) -> Vec<&pi_ai::ToolResultMessage> {
     messages
         .iter()
         .filter_map(|message| match message {
-            Message::ToolResult(result) => Some(result),
+            Message::ToolResult(result) => Some(result.as_ref()),
             _ => None,
         })
         .collect()

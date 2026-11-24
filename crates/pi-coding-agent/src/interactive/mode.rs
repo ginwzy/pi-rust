@@ -66,7 +66,7 @@ pub(super) struct ModeState {
     pub startup_notices_shown: bool,
     pub last_status: Option<LastStatus>,
     pub streaming_component: Option<Rc<RefCell<AssistantMessageComponent>>>,
-    pub streaming_message: Option<AssistantMessage>,
+    pub streaming_message: Option<std::sync::Arc<AssistantMessage>>,
     pub pending_tools: Vec<(String, Rc<RefCell<ToolExecutionComponent>>)>,
     pub boundary_rendered_entries: HashSet<String>,
     pub tool_output_expanded: bool,

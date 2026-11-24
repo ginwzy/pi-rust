@@ -43,7 +43,7 @@ impl InteractiveMode {
                 }
             }
             UiEvent::QueueUpdate => self.update_pending_messages_display(),
-            UiEvent::EntryAppended(entry) => self.on_entry_appended(entry),
+            UiEvent::EntryAppended(entry) => self.on_entry_appended(&entry),
             UiEvent::SessionInfoChanged => self.update_terminal_title(),
             UiEvent::ThinkingLevelChanged => self.update_editor_border_color(),
             UiEvent::MessageStart(message) => self.on_message_start(message),
@@ -162,7 +162,7 @@ impl InteractiveMode {
         state.pending_tools.iter().find(|(pending, _)| pending == id).map(|(_, tool)| tool.clone())
     }
 
-    fn on_entry_appended(&self, entry: Value) {
+    fn on_entry_appended(&self, entry: &Value) {
         let id = entry.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
         if self.state.borrow_mut().boundary_rendered_entries.remove(&id) {
             return;
@@ -279,7 +279,7 @@ impl InteractiveMode {
         let mut error = None;
         if assistant.stop_reason == StopReason::Aborted {
             let text = abort_message(self.session().retry_attempt());
-            assistant.error_message = Some(text.clone());
+            std::sync::Arc::make_mut(&mut assistant).error_message = Some(text.clone());
             error = Some(text);
         }
         streaming.borrow_mut().update_content(&assistant, false);
@@ -363,7 +363,7 @@ impl InteractiveMode {
                 .iter()
                 .rev()
                 .find_map(|entry| match entry.data() {
-                    crate::session::entry::EntryData::Message(Message::Assistant(last)) => Some(last),
+                    crate::session::entry::EntryData::Message(Message::Assistant(last)) => Some(last.as_ref()),
                     _ => None,
                 })
                 .map(count_dropped_thinking_blocks)

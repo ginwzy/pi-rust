@@ -21,7 +21,7 @@ pub use self::tool_search::ToolSearchTool;
 pub use pi_mcp::NotifyLevel;
 
 use super::tools::{ActiveSelection, ToolSource};
-use super::{AgentSession, AgentSessionEvent, lock};
+use super::{AgentSession, lock};
 use crate::resources::source_info::BUILTIN_PATH_PREFIX;
 
 /// Names of the built-in extensions, listed as `builtin:<name>` extension resources.
@@ -97,12 +97,7 @@ impl AgentSession {
     pub fn append_custom_entry(&self, custom_type: &str, data: Option<Value>) {
         let appended = self.session_manager().append_custom_entry(custom_type, data);
         match appended {
-            Ok(id) => {
-                let entry = self.session_manager().get_entry(&id).map(|entry| Value::Object(entry.raw().clone()));
-                if let Some(entry) = entry {
-                    self.emit(&AgentSessionEvent::EntryAppended { entry });
-                }
-            }
+            Ok(id) => self.emit_entry(&id),
             Err(error) => eprintln!("Warning: could not save session: {error:#}"),
         }
     }

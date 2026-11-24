@@ -66,7 +66,7 @@ fn is_aborted(signal: Option<&AbortSignal>) -> bool {
 
 /// Push the terminal `Error` event of an aborted stream.
 fn push_aborted(sender: &EventSender, partial: &AssistantMessage) {
-    sender.push(AssistantMessageEvent::Error { reason: StopReason::Aborted, error: aborted_message(partial) });
+    sender.push(AssistantMessageEvent::Error { reason: StopReason::Aborted, error: aborted_message(partial).into() });
 }
 
 /// Stream `message` block by block. `Err` means the message has no terminal stop reason; the caller reports it.
@@ -81,7 +81,7 @@ pub(super) async fn stream_with_deltas(
         push_aborted(sender, &partial);
         return Ok(());
     }
-    sender.push(AssistantMessageEvent::Start { partial: partial.clone() });
+    sender.push(AssistantMessageEvent::Start { partial: partial.clone().into() });
 
     for (index, block) in message.content.iter().enumerate() {
         if is_aborted(signal) {
@@ -95,7 +95,10 @@ pub(super) async fn stream_with_deltas(
                     thinking_signature: None,
                     redacted: false,
                 });
-                sender.push(AssistantMessageEvent::ThinkingStart { content_index: index, partial: partial.clone() });
+                sender.push(AssistantMessageEvent::ThinkingStart {
+                    content_index: index,
+                    partial: partial.clone().into(),
+                });
                 for chunk in split_by_token_size(thinking, pacing) {
                     schedule_chunk(&chunk, pacing.tokens_per_second).await;
                     if is_aborted(signal) {
@@ -106,17 +109,21 @@ pub(super) async fn stream_with_deltas(
                         thinking.push_str(&chunk);
                     }
                     let partial = partial.clone();
-                    sender.push(AssistantMessageEvent::ThinkingDelta { content_index: index, delta: chunk, partial });
+                    sender.push(AssistantMessageEvent::ThinkingDelta {
+                        content_index: index,
+                        delta: chunk,
+                        partial: partial.into(),
+                    });
                 }
                 sender.push(AssistantMessageEvent::ThinkingEnd {
                     content_index: index,
                     content: thinking.clone(),
-                    partial: partial.clone(),
+                    partial: partial.clone().into(),
                 });
             }
             ContentBlock::Text { text, .. } => {
                 partial.content.push(ContentBlock::text(""));
-                sender.push(AssistantMessageEvent::TextStart { content_index: index, partial: partial.clone() });
+                sender.push(AssistantMessageEvent::TextStart { content_index: index, partial: partial.clone().into() });
                 for chunk in split_by_token_size(text, pacing) {
                     schedule_chunk(&chunk, pacing.tokens_per_second).await;
                     if is_aborted(signal) {
@@ -127,12 +134,16 @@ pub(super) async fn stream_with_deltas(
                         text.push_str(&chunk);
                     }
                     let partial = partial.clone();
-                    sender.push(AssistantMessageEvent::TextDelta { content_index: index, delta: chunk, partial });
+                    sender.push(AssistantMessageEvent::TextDelta {
+                        content_index: index,
+                        delta: chunk,
+                        partial: partial.into(),
+                    });
                 }
                 sender.push(AssistantMessageEvent::TextEnd {
                     content_index: index,
                     content: text.clone(),
-                    partial: partial.clone(),
+                    partial: partial.clone().into(),
                 });
             }
             ContentBlock::ToolCall(call) => {
@@ -142,7 +153,10 @@ pub(super) async fn stream_with_deltas(
                     arguments: JsonObject::new(),
                     ..ToolCall::default()
                 }));
-                sender.push(AssistantMessageEvent::ToolcallStart { content_index: index, partial: partial.clone() });
+                sender.push(AssistantMessageEvent::ToolcallStart {
+                    content_index: index,
+                    partial: partial.clone().into(),
+                });
                 for chunk in split_by_token_size(&json_stringify(&call.arguments), pacing) {
                     schedule_chunk(&chunk, pacing.tokens_per_second).await;
                     if is_aborted(signal) {
@@ -150,7 +164,11 @@ pub(super) async fn stream_with_deltas(
                         return Ok(());
                     }
                     let partial = partial.clone();
-                    sender.push(AssistantMessageEvent::ToolcallDelta { content_index: index, delta: chunk, partial });
+                    sender.push(AssistantMessageEvent::ToolcallDelta {
+                        content_index: index,
+                        delta: chunk,
+                        partial: partial.into(),
+                    });
                 }
                 if let ContentBlock::ToolCall(open) = &mut partial.content[index] {
                     open.arguments = call.arguments.clone();
@@ -158,7 +176,7 @@ pub(super) async fn stream_with_deltas(
                 sender.push(AssistantMessageEvent::ToolcallEnd {
                     content_index: index,
                     tool_call: call.clone(),
-                    partial: partial.clone(),
+                    partial: partial.clone().into(),
                 });
             }
             ContentBlock::Image { .. } => {
@@ -171,11 +189,11 @@ pub(super) async fn stream_with_deltas(
     match message.stop_reason {
         StopReason::Pending => Err("Faux response ended without a stop reason".into()),
         reason @ (StopReason::Error | StopReason::Aborted) => {
-            sender.push(AssistantMessageEvent::Error { reason, error: message.clone() });
+            sender.push(AssistantMessageEvent::Error { reason, error: message.clone().into() });
             Ok(())
         }
         reason => {
-            sender.push(AssistantMessageEvent::Done { reason, message: message.clone() });
+            sender.push(AssistantMessageEvent::Done { reason, message: message.clone().into() });
             Ok(())
         }
     }

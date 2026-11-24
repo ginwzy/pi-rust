@@ -80,7 +80,7 @@ fn nonce() -> String {
     format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())
 }
 
-async fn answer(harness: &Harness, conversation_id: ConversationId, answer: EntryId) -> AssistantMessage {
+async fn answer(harness: &Harness, conversation_id: ConversationId, answer: EntryId) -> Arc<AssistantMessage> {
     let entry = harness.commit(move |tx: Tx| async move { tx.entry(answer).await }, &context()).await.unwrap().unwrap();
     assert_eq!(entry.conversation_id, conversation_id, "Answer belongs to another conversation");
     match entry.model.unwrap_or_default().into_iter().next() {
@@ -89,7 +89,7 @@ async fn answer(harness: &Harness, conversation_id: ConversationId, answer: Entr
     }
 }
 
-async fn ask(harness: &Harness, root: &Conversation, content: String) -> AssistantMessage {
+async fn ask(harness: &Harness, root: &Conversation, content: String) -> Arc<AssistantMessage> {
     let settled =
         root.submit(SubmissionDraft::input(content), &context()).await.unwrap().wait(&context()).await.unwrap();
     assert_eq!(settled.status, pi_durable::SubmissionStatus::Done);

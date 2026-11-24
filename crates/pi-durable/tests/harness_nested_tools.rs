@@ -65,7 +65,7 @@ pub fn done() -> FauxResponseStep {
     faux_assistant_message(vec![faux_text("done")], FauxMessageOptions::default()).into()
 }
 
-pub fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
+pub fn results(entries: &[EntryRecord]) -> Vec<Arc<ToolResultMessage>> {
     entries
         .iter()
         .filter(|entry| TOOL_RESULT_ENTRY.is(Some(entry)))

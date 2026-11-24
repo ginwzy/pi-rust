@@ -5,6 +5,7 @@
 mod common;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use common::*;
 use pi_coding_agent::session::listing::{
@@ -72,7 +73,7 @@ fn activity_time_comes_from_the_last_message() {
     let mut session = SessionManager::open(&path).unwrap();
     let mut late = assistant("later");
     if let pi_ai::Message::Assistant(message) = &mut late {
-        message.timestamp = 1_800_000_000_000;
+        Arc::make_mut(message).timestamp = 1_800_000_000_000;
     }
     session.append_message(&late).unwrap();
     session.append_session_info("Named session").unwrap();

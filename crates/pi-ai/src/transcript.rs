@@ -28,7 +28,7 @@ pub fn create_initial_system_message(system_prompt: Option<&str>, tools: &[Tool]
 pub fn normalize_context(context: &Context) -> Vec<Message> {
     let initial = create_initial_system_message(context.system_prompt.as_deref(), &context.tools);
     let mut messages: Vec<Message> =
-        initial.map(Message::System).into_iter().chain(context.messages.iter().cloned()).collect();
+        initial.map(Message::from).into_iter().chain(context.messages.iter().cloned()).collect();
     if let Some(index) = messages.iter().position(|message| matches!(message, Message::System(_)))
         && index > 0
     {
@@ -40,7 +40,7 @@ pub fn normalize_context(context: &Context) -> Vec<Message> {
 
 fn system_messages(messages: &[Message]) -> impl Iterator<Item = &SystemMessage> {
     messages.iter().filter_map(|message| match message {
-        Message::System(system) => Some(system),
+        Message::System(system) => Some(system.as_ref()),
         _ => None,
     })
 }
@@ -167,7 +167,7 @@ pub fn current_system_prompt(messages: &[Message]) -> String {
 
 /// Rebuild for APIs without mid-conversation system messages: the replayed one leads.
 pub fn collapse_system_messages(messages: &[Message]) -> Vec<Message> {
-    let head = current_system_message(messages).map(Message::System);
+    let head = current_system_message(messages).map(Message::from);
     head.into_iter().chain(messages.iter().filter(|message| !matches!(message, Message::System(_))).cloned()).collect()
 }
 

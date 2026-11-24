@@ -270,7 +270,7 @@ async fn websocket_request(
 
 /// Output items of this response as they appear in the next request's input.
 fn response_items(prepared: &Prepared, builder: &MessageBuilder) -> Vec<Value> {
-    let output = [Message::Assistant(builder.message().clone())];
+    let output = [Message::from(builder.message().clone())];
     codex_input(&prepared.model, &output, prepared.compat, &prepared.grammar)
         .unwrap_or_default()
         .into_iter()

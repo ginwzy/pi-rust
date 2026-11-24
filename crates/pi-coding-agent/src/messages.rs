@@ -41,7 +41,7 @@ pub trait CustomRole: Serialize + DeserializeOwned {
             Ok(Value::Object(fields)) => fields,
             _ => serde_json::Map::new(),
         };
-        Message::Custom(pi_ai::CustomMessage::new(Self::ROLE, fields))
+        Message::from(pi_ai::CustomMessage::new(Self::ROLE, fields))
     }
 }
 
@@ -177,7 +177,7 @@ pub fn create_custom_message(
 }
 
 fn user_text(text: String, timestamp: i64) -> Message {
-    Message::User(UserMessage {
+    Message::from(UserMessage {
         input_id: None,
         content: UserContent::Blocks(vec![ContentBlock::text(text)]),
         timestamp,
@@ -206,7 +206,7 @@ fn convert_message(message: &Message) -> Option<Message> {
                 UserContent::Text(text) => UserContent::Blocks(vec![ContentBlock::text(text)]),
                 blocks => blocks,
             };
-            Some(Message::User(UserMessage { input_id: None, content, timestamp: custom.timestamp }))
+            Some(Message::from(UserMessage { input_id: None, content, timestamp: custom.timestamp }))
         }
         BranchSummaryMessage::ROLE => {
             let summary = BranchSummaryMessage::from_message(message)?;
@@ -268,7 +268,7 @@ mod tests {
             create_custom_message("ext", UserContent::Text("hello".into()), false, None, "1970-01-01T00:00:01Z");
         let branch = create_branch_summary_message("left work", "abc", "1970-01-01T00:00:02Z");
         let compaction = create_compaction_summary_message("history", 10, "1970-01-01T00:00:03Z");
-        let unknown = Message::Custom(pi_ai::CustomMessage::new("other", serde_json::Map::new()));
+        let unknown = Message::from(pi_ai::CustomMessage::new("other", serde_json::Map::new()));
         let converted = convert_to_llm(&[custom, branch.clone(), compaction, unknown, Message::user("plain")]);
         assert_eq!(converted.len(), 4);
         assert!(matches!(&converted[0], Message::User(user) if user.timestamp == 1000

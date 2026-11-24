@@ -17,11 +17,11 @@ pub fn calling(text: &str, calls: &[&str], stop_reason: StopReason) -> Message {
         };
         content.push(ContentBlock::ToolCall(call));
     }
-    Message::Assistant(faux_assistant_message(content, FauxMessageOptions::stop_reason(stop_reason)))
+    Message::from(faux_assistant_message(content, FauxMessageOptions::stop_reason(stop_reason)))
 }
 
 pub fn tool_result(id: &str) -> Message {
-    Message::ToolResult(ToolResultMessage {
+    Message::from(ToolResultMessage {
         tool_call_id: id.to_owned(),
         tool_name: format!("tool-{id}"),
         content: vec![ContentBlock::text(format!("result {id}"))],
@@ -36,7 +36,7 @@ pub fn tool_result(id: &str) -> Message {
 
 pub fn system(key: &str, text: &str) -> Message {
     let sections = serde_json::Map::from_iter([(key.to_owned(), json!(text))]);
-    Message::System(SystemMessage {
+    Message::from(SystemMessage {
         content: UserContent::Text(String::new()),
         sections: Some(sections),
         tools_added: None,

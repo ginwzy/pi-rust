@@ -61,7 +61,7 @@ pub enum UiEvent {
         will_retry: bool,
         error_message: Option<String>,
     },
-    EntryAppended(Value),
+    EntryAppended(Arc<Value>),
     SessionInfoChanged,
     ThinkingLevelChanged,
     AutoRetryStart {

@@ -85,12 +85,14 @@ impl SessionManager {
             anyhow::bail!("Entry {branch_from_id} not found");
         }
         self.leaf = Some(branch_from_id.to_string());
+        self.bump_revision();
         Ok(())
     }
 
     /// Move the leaf before the first entry; the next append becomes a new root.
     pub fn reset_leaf(&mut self) {
         self.leaf = None;
+        self.bump_revision();
     }
 
     /// Replace this session with a new one holding only the path to `leaf_id` (labels on that

@@ -113,13 +113,13 @@ fn abortable() -> StreamFn {
     Arc::new(|model, _context, options: StreamOptions| {
         let (sender, stream) = event_channel();
         let partial = assistant(Vec::new(), StopReason::Stop);
-        sender.push(AssistantMessageEvent::Start { partial: partial.clone() });
+        sender.push(AssistantMessageEvent::Start { partial: partial.clone().into() });
         let mut error = pi_ai::AssistantMessage { stop_reason: StopReason::Aborted, ..partial };
         error.error_message = Some("Aborted".into());
         error.model = model.id.clone();
         tokio::spawn(async move {
             options.cancel.cancelled().await;
-            sender.push(AssistantMessageEvent::Error { reason: StopReason::Aborted, error });
+            sender.push(AssistantMessageEvent::Error { reason: StopReason::Aborted, error: error.into() });
         });
         stream
     })

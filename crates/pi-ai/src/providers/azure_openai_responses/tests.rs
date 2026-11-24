@@ -129,7 +129,7 @@ async fn replays_encrypted_reasoning_from_the_completed_response() {
     let (_, assistant) = collect(AzureOpenAIResponses.stream(&target, &context(), keyed(&server))).await;
     assert!(matches!(assistant.content[0], ContentBlock::Thinking { .. }));
     let history = Context {
-        messages: vec![Message::user("first"), Message::Assistant(assistant), Message::user("follow-up")],
+        messages: vec![Message::user("first"), Message::from(assistant), Message::user("follow-up")],
         ..Context::default()
     };
     collect(AzureOpenAIResponses.stream(&target, &history, keyed(&server))).await;
@@ -206,7 +206,7 @@ async fn streams_tool_calls_and_sends_images() {
     ])])
     .await;
     let image = ContentBlock::Image { data: "aGVsbG8=".into(), mime_type: "image/png".into() };
-    let user = Message::User(crate::types::UserMessage {
+    let user = Message::from(crate::types::UserMessage {
         input_id: None,
         content: crate::types::UserContent::Blocks(vec![ContentBlock::text("open it"), image]),
         timestamp: 1,

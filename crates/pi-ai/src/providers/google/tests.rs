@@ -229,7 +229,7 @@ async fn payload_hook_and_stream_events_see_sdk_shapes() {
 #[tokio::test]
 async fn sends_user_images_as_inline_data() {
     let server = MockHttp::start(vec![Reply::sse(vec![finish("STOP")])]).await;
-    let user = Message::User(UserMessage {
+    let user = Message::from(UserMessage {
         input_id: None,
         content: UserContent::Blocks(vec![
             ContentBlock::text("look"),

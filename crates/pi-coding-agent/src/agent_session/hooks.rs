@@ -35,7 +35,7 @@ impl AgentSession {
         let (model, thinking_level) = self.with_state(|state| (state.model.clone(), state.thinking_level));
         AgentLoopTurnUpdate {
             context: Some(context),
-            messages: update.map(Message::System).into_iter().collect(),
+            messages: update.map(Message::from).into_iter().collect(),
             model: Some(model),
             thinking_level: Some(thinking_level),
         }
@@ -153,7 +153,7 @@ fn force_system_prompt(messages: Vec<Message>, forced: String) -> Vec<Message> {
         timestamp: current.as_ref().map_or_else(pi_ai::now_ms, |current| current.timestamp),
     };
     let rest = messages.into_iter().filter(|message| !matches!(message, Message::System(_)));
-    std::iter::once(Message::System(head)).chain(rest).collect()
+    std::iter::once(Message::from(head)).chain(rest).collect()
 }
 
 /// A call waits for the MCP servers it needs (upstream MCP `tool_call` handler).

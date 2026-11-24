@@ -6,73 +6,117 @@ use std::sync::Arc;
 
 use pi_agent::{AgentToolResult, ToolReach};
 use pi_js::{HostValue, JsError};
+use serde::{Serialize, Serializer};
 use serde_json::{Value, json};
 
 use super::convert::prompt_options_from_json;
 use super::ops::{Args, error};
 use super::runner::{ExtensionError, ExtensionRunner};
 use crate::agent_session::{AgentSession, lock};
-use crate::session::SessionManager;
+use crate::session::{Entry, FileEntry, SessionManager, SessionTree};
 
-fn entry_json(entry: &crate::session::Entry) -> Value {
-    serde_json::to_value(entry.raw()).unwrap_or(Value::Null)
+fn raw(entry: &Entry) -> &FileEntry {
+    entry.raw()
 }
 
-fn tree_json(manager: &SessionManager) -> Value {
-    let tree = manager.get_tree();
-    fn node(tree: &crate::session::SessionTree<'_>, index: usize) -> Value {
-        let current = tree.node(index);
-        let children: Vec<Value> = current.children.iter().map(|child| node(tree, *child)).collect();
-        let mut value = json!({"entry": entry_json(current.entry), "children": children});
-        if let Some(label) = &current.label {
-            value["label"] = json!(label);
+struct TreeNodes<'a> {
+    tree: &'a SessionTree<'a>,
+    indices: &'a [usize],
+}
+
+impl Serialize for TreeNodes<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Node<'a> {
+            entry: &'a FileEntry,
+            children: TreeNodes<'a>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            label: Option<&'a str>,
         }
-        value
+        serializer.collect_seq(self.indices.iter().map(|index| {
+            let node = self.tree.node(*index);
+            Node {
+                entry: raw(node.entry),
+                children: TreeNodes { tree: self.tree, indices: &node.children },
+                label: node.label.as_deref(),
+            }
+        }))
     }
-    tree.roots.iter().map(|root| node(&tree, *root)).collect()
 }
 
-fn read_session(session: &AgentSession, method: &str, args: &Args) -> Result<Value, JsError> {
-    read_manager(&session.session_manager(), method, args)
+#[derive(Serialize)]
+struct HistoryProjection<'a> {
+    entries: Vec<HistoryEntry<'a>>,
+    messages: &'a [pi_ai::Message],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryEntry<'a> {
+    source_entry: &'a FileEntry,
+    messages: &'a [pi_ai::Message],
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryContext<'a> {
+    messages: &'a [pi_ai::Message],
+    model: Option<HistoryModel<'a>>,
+    thinking_level: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryModel<'a> {
+    provider: &'a str,
+    model_id: &'a str,
 }
 
 /// `ctx.sessionManager` methods (upstream `ReadonlySessionManager`); method arguments start at 2.
-pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) -> Result<Value, JsError> {
-    Ok(match method {
+pub(super) fn read_manager(manager: &SessionManager, method: &str, args: &Args) -> Result<HostValue, JsError> {
+    let scalar = match method {
         "getCwd" => json!(manager.cwd().display().to_string()),
         "getSessionDir" => json!(manager.session_dir().display().to_string()),
         "getSessionId" => json!(manager.id()),
         "getSessionFile" => json!(manager.file().map(|path| path.display().to_string())),
         "getLeafId" => json!(manager.leaf_id()),
-        "getLeafEntry" => manager.leaf_entry().map(entry_json).unwrap_or(Value::Null),
-        "getEntry" => manager.get_entry(&args.str(2)?).map(entry_json).unwrap_or(Value::Null),
+        "getLeafEntry" => return HostValue::serialized(&manager.leaf_entry().map(raw)),
+        "getEntry" => return HostValue::serialized(&manager.get_entry(&args.str(2)?).map(raw)),
         "getLabel" => json!(manager.get_label(&args.str(2)?)),
         "getBranch" => {
             let from = args.opt_str(2);
-            manager.get_branch(from.as_deref()).into_iter().map(entry_json).collect()
+            let entries: Vec<_> = manager.get_branch(from.as_deref()).into_iter().map(raw).collect();
+            return HostValue::serialized(&entries);
         }
-        "buildContextEntries" => manager.build_context_entries().into_iter().map(entry_json).collect(),
+        "buildContextEntries" => {
+            let entries: Vec<_> = manager.build_context_entries().into_iter().map(raw).collect();
+            return HostValue::serialized(&entries);
+        }
         "buildSessionProjection" => {
             let projection = manager.build_session_projection();
-            let entries: Vec<Value> = projection
+            let entries = projection
                 .entries
                 .iter()
-                .map(|entry| json!({"sourceEntry": entry_json(entry.source), "messages": entry.messages}))
+                .map(|entry| HistoryEntry { source_entry: raw(entry.source), messages: &entry.messages })
                 .collect();
-            json!({"entries": entries, "messages": projection.messages})
+            return HostValue::serialized(&HistoryProjection { entries, messages: &projection.messages });
         }
         "buildSessionContext" => {
             let context = manager.build_session_context();
-            let model = context.model.map(|(provider, model_id)| json!({"provider": provider, "modelId": model_id}));
-            let level = context.thinking_level.map_or("off", |level| level.as_str());
-            json!({"messages": context.messages, "model": model, "thinkingLevel": level})
+            let model = context.model.as_ref().map(|(provider, model_id)| HistoryModel { provider, model_id });
+            let thinking_level = context.thinking_level.map_or("off", |level| level.as_str());
+            return HostValue::serialized(&HistoryContext { messages: &context.messages, model, thinking_level });
         }
-        "getHeader" => serde_json::to_value(manager.header_raw()).unwrap_or(Value::Null),
-        "getEntries" => manager.entries().iter().map(entry_json).collect(),
-        "getTree" => tree_json(manager),
+        "getHeader" => return HostValue::serialized(manager.header_raw()),
+        "getEntries" => return HostValue::serialized(&manager.entries().iter().map(raw).collect::<Vec<_>>()),
+        "getTree" => {
+            let tree = manager.get_tree();
+            return HostValue::serialized(&TreeNodes { tree: &tree, indices: &tree.roots });
+        }
         "getSessionName" => json!(manager.session_name()),
         other => return Err(error(format!("Unknown session method: {other}"))),
-    })
+    };
+    Ok(HostValue::Json(scalar))
 }
 
 /// `ctx.modelRegistry` reads.
@@ -327,7 +371,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             let session = runner.target_session(target)?;
             match group {
                 "ctx" => context(runner, &session, name, target)?,
-                "session" => read_session(&session, &args.str(1)?, args)?,
+                "session" => return read_manager(&session.session_manager(), &args.str(1)?, args),
                 "models" => read_models(&session, &args.str(1)?, args)?,
                 "tools" if name == "callable" => tool_infos(&session, &session.callable_tool_names()),
                 "action" => action(runner, &session, name, args)?,

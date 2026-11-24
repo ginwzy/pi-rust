@@ -14,14 +14,14 @@ use support::chat::answer;
 use super::*;
 
 fn user(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 fn assistant(text: &str, calls: &[&str], stop: Option<StopReason>) -> Message {
     let mut blocks = vec![faux_text(text)];
     blocks.extend(calls.iter().map(|id| faux_tool_call_with_id("read", json!({}), *id)));
     let stop = stop.unwrap_or(if calls.is_empty() { StopReason::Stop } else { StopReason::ToolUse });
-    Message::Assistant(faux_assistant_message(blocks, FauxMessageOptions::stop_reason(stop)))
+    Message::from(faux_assistant_message(blocks, FauxMessageOptions::stop_reason(stop)))
 }
 
 fn tool_result(id: &str) -> Message {
@@ -88,7 +88,7 @@ async fn ex09_context_derives_request_messages_from_the_raw_transcript() {
         tools_removed: None,
         timestamp: 4,
     };
-    say(&transcript, model("pi.system", vec![Message::System(system)])).await;
+    say(&transcript, model("pi.system", vec![Message::from(system)])).await;
     say(&transcript, model("message", vec![tool_result("a")])).await;
     say(&transcript, model("message", vec![assistant("a and b look fine", &[], None)])).await;
     let replace = ContextEdit {

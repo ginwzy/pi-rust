@@ -189,11 +189,11 @@ const COPILOT_413: &str = r#"github-copilot API error (413): {"message":"failed 
 const REQUEST_LIMIT: usize = 32 * 1024 * 1024;
 
 fn user(content: String, timestamp: i64) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(content), timestamp })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(content), timestamp })
 }
 
 fn assistant(model: &Model, content: Vec<ContentBlock>, stop: StopReason, timestamp: i64) -> Message {
-    Message::Assistant(AssistantMessage { content, stop_reason: stop, timestamp, ..AssistantMessage::empty(model) })
+    Message::from(AssistantMessage { content, stop_reason: stop, timestamp, ..AssistantMessage::empty(model) })
 }
 
 /// A finished image-heavy turn, then a recent text turn that fits the retained tail.
@@ -204,7 +204,7 @@ fn seed_image_history(manager: &mut SessionManager, model: &Model, image: &str) 
     let history = [
         user("Review the old images".into(), timestamp),
         assistant(model, vec![ContentBlock::ToolCall(call)], StopReason::ToolUse, timestamp),
-        Message::ToolResult(ToolResultMessage {
+        Message::from(ToolResultMessage {
             tool_call_id: "read-images".into(),
             tool_name: "read".into(),
             content: images,
@@ -222,7 +222,7 @@ fn seed_image_history(manager: &mut SessionManager, model: &Model, image: &str) 
 
 fn has_image(message: &Message) -> bool {
     let blocks = match message {
-        Message::User(UserMessage { content: UserContent::Blocks(blocks), .. }) => blocks,
+        Message::User(user) if let UserContent::Blocks(blocks) = &user.content => blocks,
         Message::ToolResult(result) => &result.content,
         _ => return false,
     };
@@ -281,7 +281,7 @@ async fn pre_prompt_recovery_omits_a_truncated_tool_call_with_its_result() {
     let history = [
         user("Check status".into(), timestamp),
         assistant(&model, vec![ContentBlock::ToolCall(call)], StopReason::Length, timestamp),
-        Message::ToolResult(ToolResultMessage {
+        Message::from(ToolResultMessage {
             tool_call_id: "call_test".into(),
             tool_name: "bash".into(),
             content: vec![ContentBlock::text("Not executed: output token limit reached.")],

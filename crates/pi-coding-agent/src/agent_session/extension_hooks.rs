@@ -11,6 +11,8 @@ use pi_agent::{
     AfterToolCall, AfterToolCallResult, AgentEvent, AgentEventHookFn, BeforeToolCall, BeforeToolCallResult,
 };
 use pi_ai::{AssistantMessage, Message, Model, StopReason, StreamOptions, ToolResultMessage};
+use pi_js::HostValue;
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{AgentSession, lock};
@@ -18,6 +20,13 @@ use crate::extensions::ExtensionRunner;
 
 /// Extension hooks around provider requests, shared with the session's stream function.
 pub type RequestHooksSlot = Arc<RwLock<Option<Weak<ExtensionRunner>>>>;
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ContextMessage {
+    Original(usize),
+    Changed(Message),
+}
 
 fn slot_runner(slot: &RequestHooksSlot) -> Option<Arc<ExtensionRunner>> {
     slot.read().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().and_then(Weak::upgrade)
@@ -287,14 +296,25 @@ impl AgentSession {
         else {
             return messages;
         };
-        match runner.call_json("emitContext", vec![json!(messages)]).await {
-            Ok(changed) => serde_json::from_value(changed).unwrap_or(messages),
-            Err(_) => messages,
-        }
+        let Ok(input) = HostValue::serialized(&messages) else { return messages };
+        let Ok(result) = runner.call("emitContext", vec![input]).await else { return messages };
+        let Ok(projected) = serde_json::from_value::<Vec<ContextMessage>>(result.into_json()) else { return messages };
+        projected
+            .into_iter()
+            .map(|projected| match projected {
+                ContextMessage::Original(index) => messages.get(index).cloned(),
+                ContextMessage::Changed(message) => Some(message),
+            })
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or(messages)
     }
 
     /// `turn_end` from the loop's `finish_turn`: whether a handler asked to continue.
-    pub(crate) async fn finish_turn_boundary(&self, message: &AssistantMessage, results: &[ToolResultMessage]) -> bool {
+    pub(crate) async fn finish_turn_boundary(
+        &self,
+        message: &Arc<AssistantMessage>,
+        results: &[Arc<ToolResultMessage>],
+    ) -> bool {
         let Some(runner) = self.extension_runner() else { return false };
         lock(&self.extensions.dispatched).push(message.timestamp);
         self.dispatch_turn_end(&runner, message, results).await
@@ -303,8 +323,8 @@ impl AgentSession {
     async fn dispatch_turn_end(
         &self,
         runner: &ExtensionRunner,
-        message: &AssistantMessage,
-        results: &[ToolResultMessage],
+        message: &Arc<AssistantMessage>,
+        results: &[Arc<ToolResultMessage>],
     ) -> bool {
         let outcome = outcome(message);
         *lock(&self.extensions.outcome) = outcome;

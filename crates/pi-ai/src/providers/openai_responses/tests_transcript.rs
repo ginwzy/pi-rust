@@ -410,8 +410,7 @@ async fn namespaces_and_grammar_tool_calls_round_trip() {
         grammar_tool_input_properties: BTreeMap::from([("query".to_string(), "input".to_string())]),
         ..ConvertOptions::default()
     };
-    let history =
-        normalize_context(&Context { messages: vec![Message::Assistant(message.clone())], ..Context::default() });
+    let history = normalize_context(&Context { messages: vec![Message::from(message.clone())], ..Context::default() });
     let replayed = convert_messages(&model, &history, &grammar).unwrap();
     assert_eq!(
         replayed[0],
@@ -521,7 +520,7 @@ async fn service_tiers_are_sent_and_priced() {
 async fn mid_convo_effort_sends_levels_as_configuration_updates() {
     let model = model(json!({"supportsMidConvoEffort": true}));
     let reply = |level: Option<&str>| {
-        Message::Assistant(crate::types::AssistantMessage {
+        Message::from(crate::types::AssistantMessage {
             content: vec![crate::types::ContentBlock::text("a")],
             api: API.into(),
             provider: "openai".into(),

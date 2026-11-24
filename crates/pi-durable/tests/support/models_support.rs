@@ -80,9 +80,9 @@ impl Models for WrappedModels {
 pub fn scripted_stream(partial: AssistantMessage, wait_ms: u64, last: AssistantMessage) -> AssistantMessageEventStream {
     let (sender, stream) = event_channel();
     tokio::spawn(async move {
-        sender.push(AssistantMessageEvent::Start { partial });
+        sender.push(AssistantMessageEvent::Start { partial: partial.into() });
         tokio::time::sleep(Duration::from_millis(wait_ms)).await;
-        sender.push(AssistantMessageEvent::Done { reason: last.stop_reason, message: last });
+        sender.push(AssistantMessageEvent::Done { reason: last.stop_reason, message: last.into() });
     });
     stream
 }

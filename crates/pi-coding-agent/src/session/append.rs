@@ -1,7 +1,7 @@
 //! Appending entries. Each entry becomes a child of the leaf and the new leaf. Field order
 //! follows the upstream object literals so files match ones the TypeScript pi writes.
 
-use pi_ai::{ContentBlock, Message, ThinkingLevel, Usage, UserContent};
+use pi_ai::{ContentBlock, Message, SystemMessage, ThinkingLevel, Usage, UserContent};
 use serde_json::{Value, json};
 
 use super::SessionManager;
@@ -23,11 +23,98 @@ fn to_json<T: serde::Serialize>(value: &T) -> Option<Value> {
     serde_json::to_value(value).ok()
 }
 
-impl SessionManager {
-    pub(crate) fn parent_value(&self) -> Value {
-        self.leaf.clone().map_or(Value::Null, Value::String)
+pub(crate) struct PendingEntry<'a> {
+    pub id: String,
+    pub parent: Option<&'a str>,
+}
+
+impl PendingEntry<'_> {
+    fn link(self) -> [(&'static str, Option<Value>); 3] {
+        [
+            ("id", Some(json!(self.id))),
+            ("parentId", Some(json!(self.parent))),
+            ("timestamp", Some(json!(iso_timestamp()))),
+        ]
     }
 
+    fn fields(self, kind: &str) -> Vec<(&'static str, Option<Value>)> {
+        let mut fields = vec![("type", Some(json!(kind)))];
+        fields.extend(self.link());
+        fields
+    }
+
+    pub fn custom(self, custom_type: &str, data: Option<Value>) -> Entry {
+        let mut fields =
+            vec![("type", Some(json!("custom"))), ("customType", Some(json!(custom_type))), ("data", data)];
+        fields.extend(self.link());
+        Entry::build(fields)
+    }
+
+    pub fn custom_message(
+        self,
+        custom_type: &str,
+        content: UserContent,
+        display: bool,
+        details: Option<Value>,
+    ) -> Entry {
+        let mut fields = vec![
+            ("type", Some(json!("custom_message"))),
+            ("customType", Some(json!(custom_type))),
+            ("content", to_json(&content)),
+            ("display", Some(json!(display))),
+            ("details", details),
+        ];
+        fields.extend(self.link());
+        Entry::build(fields)
+    }
+
+    pub fn compaction(self, mut system: Option<SystemMessage>, compaction: NewCompaction) -> Entry {
+        let first_kept = compaction.first_kept_entry_id.as_deref().unwrap_or(&self.id).to_owned();
+        let timestamp = iso_timestamp();
+        if let Some(system) = &mut system {
+            system.timestamp = parse_iso(&timestamp).unwrap_or_default();
+        }
+        Entry::build(vec![
+            ("type", Some(json!("compaction"))),
+            ("id", Some(json!(self.id))),
+            ("parentId", Some(json!(self.parent))),
+            ("timestamp", Some(json!(timestamp))),
+            ("summary", Some(json!(compaction.summary))),
+            ("firstKeptEntryId", Some(json!(first_kept))),
+            ("tokensBefore", Some(json!(compaction.tokens_before))),
+            ("details", compaction.details),
+            ("usage", compaction.usage.as_ref().and_then(to_json)),
+            ("fromHook", compaction.from_hook.map(Value::Bool)),
+            ("systemMessage", system.as_ref().and_then(to_json)),
+        ])
+    }
+
+    pub fn context_edit(self, target: &Entry, replacement: Option<Value>) -> anyhow::Result<Entry> {
+        if replacement.as_ref().is_some_and(|content| !content.is_string() && !content.is_array()) {
+            anyhow::bail!("Context edit replacement must be null or contain string/array content");
+        }
+        let target_id = target.id();
+        let role = match target.data() {
+            EntryData::CustomMessage(_) => "custom",
+            EntryData::Message(message) if matches!(message.role(), "user" | "assistant" | "toolResult") => {
+                message.role()
+            }
+            _ => anyhow::bail!("Entry {target_id} does not contribute editable model content"),
+        };
+        let replacement = match replacement {
+            Some(Value::String(text)) if matches!(role, "assistant" | "toolResult") => {
+                json!({ "content": [ContentBlock::text(text)] })
+            }
+            Some(content) => json!({ "content": content }),
+            None => Value::Null,
+        };
+        let mut fields = self.fields("context_edit");
+        fields.extend([("targetId", Some(json!(target_id))), ("replacement", Some(replacement))]);
+        Ok(Entry::build(fields))
+    }
+}
+
+impl SessionManager {
     fn append_typed(&mut self, kind: &str, fields: Vec<(&str, Option<Value>)>) -> anyhow::Result<String> {
         let mut all = self.entry_fields(self.new_entry_id(), kind);
         all.extend(fields);
@@ -35,12 +122,11 @@ impl SessionManager {
     }
 
     fn entry_fields(&self, id: String, kind: &str) -> Vec<(&'static str, Option<Value>)> {
-        vec![
-            ("type", Some(Value::String(kind.into()))),
-            ("id", Some(Value::String(id))),
-            ("parentId", Some(self.parent_value())),
-            ("timestamp", Some(Value::String(iso_timestamp()))),
-        ]
+        PendingEntry { id, parent: self.leaf_id() }.fields(kind)
+    }
+
+    fn pending_entry(&self) -> PendingEntry<'_> {
+        PendingEntry { id: self.new_entry_id(), parent: self.leaf_id() }
     }
 
     /// Append a message. Summary roles belong in compaction and branch summary entries instead.
@@ -102,38 +188,13 @@ impl SessionManager {
 
     /// A compaction entry with its system checkpoint: the replayed prompt and tools at this point.
     pub fn append_compaction_with(&mut self, compaction: NewCompaction) -> anyhow::Result<String> {
-        let timestamp = iso_timestamp();
-        let system = self.current_system_message().map(|mut system| {
-            system.timestamp = parse_iso(&timestamp).unwrap_or_default();
-            system
-        });
-        let id = self.new_entry_id();
-        let entry = Entry::build(vec![
-            ("type", Some(json!("compaction"))),
-            ("id", Some(json!(id))),
-            ("parentId", Some(self.parent_value())),
-            ("timestamp", Some(json!(timestamp))),
-            ("summary", Some(json!(compaction.summary))),
-            ("firstKeptEntryId", Some(json!(compaction.first_kept_entry_id.unwrap_or_else(|| id.clone())))),
-            ("tokensBefore", Some(json!(compaction.tokens_before))),
-            ("details", compaction.details),
-            ("usage", compaction.usage.as_ref().and_then(to_json)),
-            ("fromHook", compaction.from_hook.map(Value::Bool)),
-            ("systemMessage", system.as_ref().and_then(to_json)),
-        ]);
+        let entry = self.pending_entry().compaction(self.current_system_message(), compaction);
         self.append_entry(entry)
     }
 
     /// Extension state that never enters the LLM context.
     pub fn append_custom_entry(&mut self, custom_type: &str, data: Option<Value>) -> anyhow::Result<String> {
-        let entry = Entry::build(vec![
-            ("type", Some(json!("custom"))),
-            ("customType", Some(json!(custom_type))),
-            ("data", data),
-            ("id", Some(json!(self.new_entry_id()))),
-            ("parentId", Some(self.parent_value())),
-            ("timestamp", Some(json!(iso_timestamp()))),
-        ]);
+        let entry = self.pending_entry().custom(custom_type, data);
         self.append_entry(entry)
     }
 
@@ -163,16 +224,7 @@ impl SessionManager {
         display: bool,
         details: Option<Value>,
     ) -> anyhow::Result<String> {
-        let entry = Entry::build(vec![
-            ("type", Some(json!("custom_message"))),
-            ("customType", Some(json!(custom_type))),
-            ("content", to_json(&content)),
-            ("display", Some(json!(display))),
-            ("details", details),
-            ("id", Some(json!(self.new_entry_id()))),
-            ("parentId", Some(self.parent_value())),
-            ("timestamp", Some(json!(iso_timestamp()))),
-        ]);
+        let entry = self.pending_entry().custom_message(custom_type, content, display, details);
         self.append_entry(entry)
     }
 
@@ -186,24 +238,8 @@ impl SessionManager {
         if !self.get_branch(None).iter().any(|entry| entry.id() == target_id) {
             anyhow::bail!("Entry {target_id} is not on the active branch");
         }
-        let role = match target.data() {
-            EntryData::CustomMessage(_) => "custom",
-            EntryData::Message(message) if matches!(message.role(), "user" | "assistant" | "toolResult") => {
-                message.role()
-            }
-            _ => anyhow::bail!("Entry {target_id} does not contribute editable model content"),
-        };
-        let replacement = match replacement {
-            Some(Value::String(text)) if matches!(role, "assistant" | "toolResult") => {
-                json!({ "content": [ContentBlock::text(text)] })
-            }
-            Some(content) => json!({ "content": content }),
-            None => Value::Null,
-        };
-        self.append_typed(
-            "context_edit",
-            vec![("targetId", Some(json!(target_id))), ("replacement", Some(replacement))],
-        )
+        let entry = self.pending_entry().context_edit(target, replacement)?;
+        self.append_entry(entry)
     }
 
     /// Set (or clear with `None` or an empty label) a bookmark on an entry.
@@ -242,6 +278,7 @@ impl SessionManager {
         }
         let from_id = self.leaf.clone().unwrap_or_else(|| "root".into());
         self.leaf = branch_from.map(String::from);
+        self.bump_revision();
         self.append_typed(
             "branch_summary",
             vec![

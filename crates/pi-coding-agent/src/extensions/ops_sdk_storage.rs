@@ -265,10 +265,6 @@ fn session_op(runner: &ExtensionRunner, state: &mut StorageState, name: &str, ar
             let id = args.u64(0);
             state.with_manager(id, |manager| descriptor(id, manager, agent_dir))
         }
-        "read" => {
-            let method = args.str(1)?;
-            state.with_manager(args.u64(0), |manager| read_manager(manager, &method, args))?
-        }
         "write" => {
             let method = args.str(1)?;
             state.with_manager(args.u64(0), |manager| write_manager(manager, &method, args))?
@@ -292,6 +288,10 @@ pub(crate) fn sync(
     let (group, name) = rest.split_once('.').unwrap_or((rest, ""));
     let mut state = lock(state);
     let value = match group {
+        "session" if name == "read" => {
+            let method = args.str(1)?;
+            return state.with_manager(args.u64(0), |manager| read_manager(manager, &method, args))?;
+        }
         "session" => session_op(runner, &mut state, name, args)?,
         "settings" => ops_sdk_settings::settings_op(runner, &mut state, name, args)?,
         _ => return Err(error(format!("Unknown host operation: {op}"))),

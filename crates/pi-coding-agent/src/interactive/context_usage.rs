@@ -53,7 +53,7 @@ fn system_tokens(content: &str, sections: Option<JsonObject>, tools: &[Tool]) ->
         tools_removed: None,
         timestamp: 0,
     };
-    estimate_tokens(&Message::System(system))
+    estimate_tokens(&Message::from(system))
 }
 
 /// Context files and skills are prompt sections; the rest of the prompt is the system prompt.
@@ -231,17 +231,17 @@ mod tests {
 
     fn system(chars: usize) -> Message {
         let content = UserContent::Text(text_of(chars));
-        Message::System(SystemMessage { content, sections: None, tools_added: None, tools_removed: None, timestamp: 0 })
+        Message::from(SystemMessage { content, sections: None, tools_added: None, tools_removed: None, timestamp: 0 })
     }
 
     fn assistant(chars: usize) -> Message {
         let content = vec![ContentBlock::text(text_of(chars))];
-        Message::Assistant(AssistantMessage { content, ..AssistantMessage::default() })
+        Message::from(AssistantMessage { content, ..AssistantMessage::default() })
     }
 
     fn tool_result(chars: usize) -> Message {
         let content = vec![ContentBlock::text(text_of(chars))];
-        Message::ToolResult(ToolResultMessage { content, ..ToolResultMessage::default() })
+        Message::from(ToolResultMessage { content, ..ToolResultMessage::default() })
     }
 
     #[test]
@@ -250,7 +250,7 @@ mod tests {
         let tools = [Tool::new("read", "Read a file", json!({"type": "object"}))];
         let messages = vec![
             system(800),
-            Message::User(UserMessage { input_id: None, content: UserContent::Text(text_of(12)), timestamp: 0 }),
+            Message::from(UserMessage { input_id: None, content: UserContent::Text(text_of(12)), timestamp: 0 }),
             assistant(20),
             tool_result(400),
         ];

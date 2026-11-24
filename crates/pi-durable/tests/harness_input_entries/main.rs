@@ -120,7 +120,7 @@ pub fn mention(text: &str) -> InputEntry {
 }
 
 fn user_text(text: &str, timestamp: i64) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp })
 }
 
 #[tokio::test]

@@ -43,34 +43,46 @@ impl Stream {
             text.push_str(delta);
         }
         let partial = self.partial.clone();
-        self.changes.observe(&AssistantMessageEvent::TextDelta { content_index: 0, delta: delta.into(), partial });
+        self.changes.observe(&AssistantMessageEvent::TextDelta {
+            content_index: 0,
+            delta: delta.into(),
+            partial: partial.into(),
+        });
     }
 
     fn argument(&mut self, delta: &str) {
         if self.partial.content.len() < 2 {
             self.partial.content.push(tool_call(pi_ai::JsonObject::new()));
             let partial = self.partial.clone();
-            self.changes.observe(&AssistantMessageEvent::ToolcallStart { content_index: 1, partial });
+            self.changes.observe(&AssistantMessageEvent::ToolcallStart { content_index: 1, partial: partial.into() });
         }
         let arguments = self.args.append(delta).clone();
         self.partial.content[1] = tool_call(arguments);
         let partial = self.partial.clone();
-        self.changes.observe(&AssistantMessageEvent::ToolcallDelta { content_index: 1, delta: delta.into(), partial });
+        self.changes.observe(&AssistantMessageEvent::ToolcallDelta {
+            content_index: 1,
+            delta: delta.into(),
+            partial: partial.into(),
+        });
     }
 
     /// The provider ends both blocks.
     fn end_blocks(&mut self) {
         let content = self.partial.content[0].as_text().unwrap_or_default().to_owned();
         let partial = self.partial.clone();
-        self.changes.observe(&AssistantMessageEvent::TextEnd { content_index: 0, content, partial });
+        self.changes.observe(&AssistantMessageEvent::TextEnd { content_index: 0, content, partial: partial.into() });
         let ContentBlock::ToolCall(tool_call) = self.partial.content[1].clone() else { panic!("a tool call") };
         let partial = self.partial.clone();
-        self.changes.observe(&AssistantMessageEvent::ToolcallEnd { content_index: 1, tool_call, partial });
+        self.changes.observe(&AssistantMessageEvent::ToolcallEnd {
+            content_index: 1,
+            tool_call,
+            partial: partial.into(),
+        });
     }
 
     /// One partial commit, as the generation's throttle makes it; `fail` aborts it like a rejected commit.
     fn commit(&mut self, fail: bool) {
-        let encoded = serde_json::to_value(Message::Assistant(self.partial.clone())).unwrap();
+        let encoded = serde_json::to_value(Message::from(self.partial.clone())).unwrap();
         let mut message = Json::from(encoded);
         let taken = self.changes.take(&mut message);
         let mut change = self.tracker.begin_change();

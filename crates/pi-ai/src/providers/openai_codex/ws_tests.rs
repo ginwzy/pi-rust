@@ -211,7 +211,7 @@ async fn websocket_cached_mode_sends_only_input_deltas_on_a_reused_socket() {
         .await;
     assert_eq!(first.response_id.as_deref(), Some("resp_1"));
     let mut next = context();
-    next.messages.push(Message::Assistant(first));
+    next.messages.push(Message::from(first));
     next.messages.push(Message::user("Now finish"));
     let second = OpenAICodexResponses
         .stream(&model, &next, options(&token, Transport::WebsocketCached, Some("session-delta")))

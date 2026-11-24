@@ -117,11 +117,11 @@ fn compacted_session(model: &Model, before: i64, total: u64) -> (SessionManager,
     let mut session = memory();
     let mut first = user("before compaction");
     if let Message::User(message) = &mut first {
-        message.timestamp = before - 1000;
+        std::sync::Arc::make_mut(message).timestamp = before - 1000;
     }
     session.append_message(&first).unwrap();
     let stale = reply(model, StopReason::Stop, None, total, before);
-    session.append_message(&Message::Assistant(stale.clone())).unwrap();
+    session.append_message(&Message::from(stale.clone())).unwrap();
     let first_kept = session.entries()[0].id().to_string();
     session.append_compaction("summary", &first_kept, total).unwrap();
     (session, stale)
@@ -144,17 +144,15 @@ fn error_responses_use_the_last_successful_usage() {
     let now = pi_ai::now_ms();
     let success = reply(&check.model, StopReason::Stop, None, 190_000, now);
     let failure = reply(&check.model, StopReason::Error, Some("529 overloaded"), 0, now + 1000);
-    check.messages =
-        vec![user("hello"), Message::Assistant(success), user("retry"), Message::Assistant(failure.clone())];
+    check.messages = vec![user("hello"), Message::from(success), user("retry"), Message::from(failure.clone())];
     assert_eq!(check.run(&session, &failure), CompactionCheck::Threshold);
-    check.messages = vec![user("hello"), Message::Assistant(failure.clone())];
+    check.messages = vec![user("hello"), Message::from(failure.clone())];
     assert_eq!(check.run(&session, &failure), CompactionCheck::Nothing, "no prior usage");
 
     let model = FauxProvider::model();
     let (session, kept) = compacted_session(&model, now - 10_000, 190_000);
     let failure = reply(&model, StopReason::Error, Some("529 overloaded"), 0, now);
-    check.messages =
-        vec![user("kept user"), Message::Assistant(kept), user("new prompt"), Message::Assistant(failure.clone())];
+    check.messages = vec![user("kept user"), Message::from(kept), user("new prompt"), Message::from(failure.clone())];
     assert_eq!(check.run(&session, &failure), CompactionCheck::Nothing, "only kept pre-compaction usage");
 }
 
@@ -183,7 +181,7 @@ fn omitted_recovery_responses_leave_the_projection() {
     session.append_message(&user("question")).unwrap();
     let mut truncated = reply(&model, StopReason::Length, None, 10, pi_ai::now_ms());
     truncated.usage.output = 50;
-    let message = Message::Assistant(truncated.clone());
+    let message = Message::from(truncated.clone());
     session.append_message(&message).unwrap();
     let entry_id = find_message_entry_id(&session, &message).unwrap();
     assert_eq!(session.leaf_id(), Some(entry_id.as_str()));

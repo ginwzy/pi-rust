@@ -135,7 +135,7 @@ fn flush(
     changes: &Arc<Mutex<PartialChanges>>,
 ) -> Option<JoinHandle<()>> {
     // Stored as a whole `Message`, with its role, as upstream stores the `AssistantMessage`.
-    let mut message = match encode(&pi_ai::Message::Assistant(partial)) {
+    let mut message = match encode(&pi_ai::Message::from(partial)) {
         Ok(message) => message,
         Err(error) => {
             if !runtime.signal().aborted() {
@@ -214,7 +214,7 @@ fn into_partial(event: AssistantMessageEvent) -> Option<AssistantMessage> {
         | AssistantMessageEvent::ThinkingEnd { partial, .. }
         | AssistantMessageEvent::ToolcallStart { partial, .. }
         | AssistantMessageEvent::ToolcallDelta { partial, .. }
-        | AssistantMessageEvent::ToolcallEnd { partial, .. } => Some(partial),
+        | AssistantMessageEvent::ToolcallEnd { partial, .. } => Some(std::sync::Arc::unwrap_or_clone(partial)),
         _ => None,
     }
 }

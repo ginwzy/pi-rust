@@ -60,10 +60,13 @@ async fn hook_runs_before_listeners_replaces_messages_and_orders_updates() {
     agent.update_state(|state| state.tools = vec![Arc::new(Streaming)]);
     let order = Arc::new(Mutex::new(Vec::<String>::new()));
     let hook_order = order.clone();
+    let original = Arc::new(Mutex::new(None));
+    let before_edit = original.clone();
     agent.update_hooks(|hooks| {
         hooks.stream_fn = Some(stream_fn);
         hooks.on_event = Some(Arc::new(move |event, _cancel| {
             let order = hook_order.clone();
+            let before_edit = before_edit.clone();
             async move {
                 // A slow handler must still finish before listeners and the next event.
                 tokio::time::sleep(Duration::from_millis(1)).await;
@@ -72,7 +75,8 @@ async fn hook_runs_before_listeners_replaces_messages_and_orders_updates() {
                     AgentEvent::MessageEnd { message: Message::Assistant(mut assistant) }
                         if assistant.text() == "original" =>
                     {
-                        assistant.content = vec![ContentBlock::text("replaced")];
+                        *before_edit.lock().unwrap() = Some(assistant.clone());
+                        Arc::make_mut(&mut assistant).content = vec![ContentBlock::text("replaced")];
                         Some(Message::Assistant(assistant))
                     }
                     _ => None,
@@ -104,5 +108,9 @@ async fn hook_runs_before_listeners_replaces_messages_and_orders_updates() {
     }
     assert!(order.contains(&"listener:message_end:replaced".to_string()), "{order:?}");
     let last = agent.state().messages.last().cloned().unwrap();
-    assert!(matches!(last, Message::Assistant(assistant) if assistant.text() == "replaced"));
+    let Message::Assistant(replaced) = last else { panic!("expected assistant") };
+    let original = original.lock().unwrap().take().unwrap();
+    assert_eq!(replaced.text(), "replaced");
+    assert_eq!(original.text(), "original");
+    assert!(!Arc::ptr_eq(&original, &replaced));
 }

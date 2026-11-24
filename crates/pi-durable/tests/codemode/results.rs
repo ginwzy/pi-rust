@@ -1,6 +1,8 @@
 //! Port of upstream `test/codemode.test.ts`: what scripts get for tool results, the result's layout and files, and
 //! tool search.
 
+use std::sync::Arc;
+
 use pi_ai::ToolResultMessage;
 use pi_durable::env::SharedEnv;
 
@@ -68,7 +70,7 @@ async fn resolves_a_schema_less_tool_with_its_text_as_its_declaration_says_also_
 }
 
 /// The code mode call's result message, and its content as text with `<image>` for images.
-pub async fn tool_result(root: &Conversation) -> (String, ToolResultMessage) {
+pub async fn tool_result(root: &Conversation) -> (String, Arc<ToolResultMessage>) {
     let entries = all_entries(root).await;
     let entry = entries.iter().find(|entry| entry.kind == "pi.tool-result").unwrap();
     let Some(Message::ToolResult(result)) = entry.model.as_ref().and_then(|model| model.first()) else { panic!() };
@@ -100,12 +102,12 @@ async fn open_with_env(path: &str, chat: &Chat, env: SharedEnv) -> (Harness, Con
 }
 
 /// Run `code` once in a chat with a local environment; the result's text and message.
-async fn run_script(code: &str, chat: Chat) -> (String, ToolResultMessage) {
+async fn run_script(code: &str, chat: Chat) -> (String, Arc<ToolResultMessage>) {
     run_script_in(code, chat, tempfile::tempdir().unwrap()).await
 }
 
 /// [`run_script`] in the working directory `cwd`.
-async fn run_script_in(code: &str, chat: Chat, cwd: tempfile::TempDir) -> (String, ToolResultMessage) {
+async fn run_script_in(code: &str, chat: Chat, cwd: tempfile::TempDir) -> (String, Arc<ToolResultMessage>) {
     chat.holds.block.store(false, Ordering::SeqCst);
     let directory = tempfile::tempdir().unwrap();
     chat.setup.faux.set_responses([script(code), done()]);

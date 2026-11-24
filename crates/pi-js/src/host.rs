@@ -16,6 +16,7 @@ pub enum HostValue {
     #[default]
     Undefined,
     Json(serde_json::Value),
+    RawJson(Box<serde_json::value::RawValue>),
     Bytes(Vec<u8>),
     Ref(JsRef),
 }
@@ -32,6 +33,7 @@ impl HostValue {
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::Json(value) => value,
+            Self::RawJson(value) => serde_json::from_str(value.get()).unwrap_or(serde_json::Value::Null),
             Self::Bytes(bytes) => bytes.into_iter().map(serde_json::Value::from).collect(),
             Self::Undefined | Self::Ref(_) => serde_json::Value::Null,
         }
@@ -50,6 +52,10 @@ impl HostValue {
 
     pub fn is_undefined(&self) -> bool {
         matches!(self, Self::Undefined)
+    }
+
+    pub fn serialized(value: &impl serde::Serialize) -> Result<Self, JsError> {
+        Ok(Self::RawJson(serde_json::value::to_raw_value(value)?))
     }
 }
 

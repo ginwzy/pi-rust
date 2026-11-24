@@ -280,7 +280,7 @@ async fn prepare_next_turn_replaces_context_and_appends_messages() {
         let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
         let update = first.then(|| AgentLoopTurnUpdate {
             context: Some(turn.context.clone()),
-            messages: vec![Message::System(SystemMessage {
+            messages: vec![Message::from(SystemMessage {
                 content: UserContent::Text("updated guidance".into()),
                 sections: None,
                 tools_added: None,

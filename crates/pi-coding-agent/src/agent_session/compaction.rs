@@ -317,7 +317,7 @@ impl AgentSession {
     /// continue (overflow recovery, or queued messages after a compaction).
     pub(crate) async fn check_compaction(
         &self,
-        assistant: &AssistantMessage,
+        assistant: &std::sync::Arc<AssistantMessage>,
         entry_id: Option<&str>,
         skip_aborted: bool,
         tool_results: &[String],

@@ -3,6 +3,8 @@
 
 mod common;
 
+use std::sync::Arc;
+
 use common::*;
 use pi_ai::{ContentBlock, Message, StopReason, SystemMessage, ToolCall, ToolResultMessage, UserContent};
 use pi_coding_agent::compaction::{
@@ -34,7 +36,7 @@ fn token_math_and_thresholds() {
     assert_eq!(calculate_context_tokens(&usage(0, 0, 0, 0)), 0);
     let mut aborted = assistant_with("Aborted", usage(300, 150, 0, 0));
     if let Message::Assistant(message) = &mut aborted {
-        message.stop_reason = StopReason::Aborted;
+        Arc::make_mut(message).stop_reason = StopReason::Aborted;
     }
     let session = chain(&[
         user("Hello"),
@@ -107,6 +109,7 @@ fn custom_messages_count_toward_the_budget() {
 fn oversized_tool_results_keep_their_call() {
     let mut call = assistant("");
     if let Message::Assistant(message) = &mut call {
+        let message = Arc::make_mut(message);
         message.content = vec![ContentBlock::ToolCall(ToolCall {
             id: "call-1".into(),
             name: "read".into(),
@@ -115,7 +118,7 @@ fn oversized_tool_results_keep_their_call() {
         })];
         message.stop_reason = StopReason::ToolUse;
     }
-    let result = Message::ToolResult(ToolResultMessage {
+    let result = Message::from(ToolResultMessage {
         tool_call_id: "call-1".into(),
         tool_name: "read".into(),
         content: vec![ContentBlock::text("x".repeat(8000))],
@@ -134,7 +137,7 @@ fn oversized_tool_results_keep_their_call() {
 
 #[test]
 fn system_messages_are_not_history() {
-    let system = Message::System(SystemMessage {
+    let system = Message::from(SystemMessage {
         content: UserContent::Text(String::new()),
         sections: Some(json!({"preamble": "current prompt"}).as_object().unwrap().clone()),
         tools_added: None,

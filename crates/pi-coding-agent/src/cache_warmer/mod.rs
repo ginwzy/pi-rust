@@ -112,6 +112,7 @@ impl CacheWarmer {
     /// The current state and the decision inputs that produced it.
     pub fn status(&self) -> CacheWarmingStatus {
         if self.host.mode() == CacheWarmingMode::Off {
+            self.on_mode_changed();
             return CacheWarmingStatus::inactive("cache warming disabled");
         }
         let snapshot = {
@@ -119,6 +120,7 @@ impl CacheWarmer {
             match &inner.run {
                 None => return inner.inactive.clone(),
                 Some(run) => (
+                    run.id,
                     run.is_current.clone(),
                     run.request.model.clone(),
                     run.phase,
@@ -128,8 +130,12 @@ impl CacheWarmer {
                 ),
             }
         };
-        let (is_current, model, phase, refreshing, next_warm_at, extension_override) = snapshot;
+        let (id, is_current, model, phase, refreshing, next_warm_at, extension_override) = snapshot;
         if !is_current() {
+            let mut inner = self.lock();
+            if inner.run.as_ref().is_some_and(|run| run.id == id) {
+                stop(&mut inner, "conversation context changed", None);
+            }
             return CacheWarmingStatus::inactive("conversation context changed");
         }
         let decision = evaluate(&model, self.host.last_prompt_tokens(), phase);

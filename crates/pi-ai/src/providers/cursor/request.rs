@@ -129,7 +129,7 @@ pub(crate) fn build(model: &Model, context: &Context, conversation_id: &str, mes
     let messages: Vec<&Message> =
         context.messages.iter().filter(|message| !matches!(message, Message::Custom(_))).collect();
     let active = match messages.last() {
-        Some(Message::User(user)) => Some(user),
+        Some(Message::User(user)) => Some(user.as_ref()),
         _ => None,
     };
     let history: Vec<Message> =
@@ -223,7 +223,7 @@ mod tests {
         };
         let context = Context {
             system_prompt: Some("Be brief".into()),
-            messages: vec![Message::user("read a"), Message::Assistant(assistant), Message::ToolResult(result)],
+            messages: vec![Message::user("read a"), Message::from(assistant), Message::from(result)],
             tools: Vec::new(),
         };
         let model = Model { id: "claude-opus-5-high".into(), name: "Claude Opus 5".into(), ..Model::default() };

@@ -84,7 +84,7 @@ pub(super) fn tool_call(id: &str, name: &str, arguments: Value) -> ToolCall {
 }
 
 pub(super) fn assistant(model: &Model, content: Vec<ContentBlock>, stop_reason: StopReason) -> Message {
-    Message::Assistant(AssistantMessage {
+    Message::from(AssistantMessage {
         content,
         api: model.api.clone(),
         provider: model.provider.clone(),
@@ -97,7 +97,7 @@ pub(super) fn assistant(model: &Model, content: Vec<ContentBlock>, stop_reason: 
 }
 
 pub(super) fn tool_result(id: &str, name: &str, content: Vec<ContentBlock>) -> Message {
-    Message::ToolResult(crate::types::ToolResultMessage {
+    Message::from(crate::types::ToolResultMessage {
         tool_call_id: id.into(),
         tool_name: name.into(),
         content,

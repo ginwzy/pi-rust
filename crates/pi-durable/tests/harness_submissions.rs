@@ -64,7 +64,7 @@ async fn places_idle_input_and_rejects_busy_input_with_when_busy_reject_without_
     let entry = root.commit(move |tx: Tx| async move { tx.entry(entry_id).await }, &ctx()).await.unwrap().unwrap();
     assert!(USER_ENTRY.is(Some(&entry)));
     let expected =
-        vec![Message::User(UserMessage { input_id: None, content: UserContent::Text("hi".into()), timestamp: 42 })];
+        vec![Message::from(UserMessage { input_id: None, content: UserContent::Text("hi".into()), timestamp: 42 })];
     assert_eq!(entry.model, Some(expected));
     let live = harness.snapshot(&LIVE_DOC, root.id, &ctx()).await.unwrap().unwrap();
     let run = live.get("run").unwrap();

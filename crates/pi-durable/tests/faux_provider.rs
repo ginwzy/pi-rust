@@ -16,7 +16,7 @@ use pi_durable::testing::faux::{
 use serde_json::json;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: now_ms() })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: now_ms() })
 }
 
 fn hi() -> Context {
@@ -218,13 +218,13 @@ async fn estimates_prompt_and_output_tokens_from_serialized_context() {
     let context = Context {
         system_prompt: Some("sys".into()),
         messages: vec![
-            Message::User(UserMessage {
+            Message::from(UserMessage {
                 input_id: None,
                 content: UserContent::Blocks(vec![faux_text("hello"), image]),
                 timestamp: 1,
             }),
-            Message::Assistant(message("prior")),
-            Message::ToolResult(ToolResultMessage {
+            Message::from(message("prior")),
+            Message::from(ToolResultMessage {
                 tool_call_id: "tool-1".into(),
                 tool_name: "echo".into(),
                 content: vec![faux_text("tool out")],
@@ -259,7 +259,7 @@ async fn does_not_share_cache_across_sessions_or_requests_without_session_id() {
     let mut context = Context { messages: vec![user("hello")], ..Context::default() };
     let first = complete(&faux, &context, session("session-1")).await;
     assert!(first.usage.cache_write > 0);
-    context.messages.push(Message::Assistant(first));
+    context.messages.push(Message::from(first));
     context.messages.push(user("follow up"));
     let second = complete(&faux, &context, session("session-2")).await;
     assert_eq!(second.usage.cache_read, 0);
@@ -277,7 +277,7 @@ async fn simulates_prompt_caching_per_session_id() {
     let first = complete(&faux, &context, session("session-1")).await;
     assert_eq!(first.usage.cache_read, 0);
     assert!(first.usage.cache_write > 0);
-    context.messages.push(Message::Assistant(first));
+    context.messages.push(Message::from(first));
     context.messages.push(user("follow up"));
     let second = complete(&faux, &context, session("session-1")).await;
     assert!(second.usage.cache_read > 0);
@@ -289,7 +289,7 @@ async fn counts_cached_characters_up_to_the_first_difference_in_the_joined_promp
     let faux = faux_provider(RegisterFauxProviderOptions::default());
     faux.set_responses([message("a"), message("b"), message("c")]);
     let user_at = |text: &str| {
-        Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
+        Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
     };
     let context = |messages: Vec<Message>| Context { messages, ..Context::default() };
     // Prompt texts: "user:hello world" (16 characters), then 16 + 2 + "user:next" (9) = 27.
@@ -314,7 +314,7 @@ async fn does_not_simulate_caching_when_cache_retention_is_none() {
         ..SimpleStreamOptions::default()
     };
     complete(&faux, &context, options.clone()).await;
-    context.messages.push(Message::Assistant(message("first")));
+    context.messages.push(Message::from(message("first")));
     context.messages.push(user("follow up"));
     let second = complete(&faux, &context, options).await;
     assert_eq!((second.usage.cache_read, second.usage.cache_write), (0, 0));

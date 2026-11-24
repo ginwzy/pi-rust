@@ -20,14 +20,14 @@ use support::context;
 use support::task_support::open_tasks;
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 fn sections(pairs: &[(&str, &str)]) -> Sections {
     pairs.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect()
 }
 
-fn system_of(draft: &EntryDraft) -> SystemMessage {
+fn system_of(draft: &EntryDraft) -> Arc<SystemMessage> {
     match draft.model.as_ref().and_then(|model| model.first()) {
         Some(Message::System(system)) => system.clone(),
         other => panic!("expected a system message, got {other:?}"),
@@ -58,7 +58,7 @@ async fn apply(conversation: &Conversation, wanted: &[(&str, &str)]) -> Vec<Stri
         .map(|draft| {
             let message = system_of(draft);
             assert_eq!((message.content.clone(), message.timestamp), (UserContent::Text(String::new()), 7));
-            let mut planned = json!({ "sections": message.sections.unwrap() });
+            let mut planned = json!({ "sections": message.sections.as_ref().unwrap() });
             if let Some(edits) = &draft.edits {
                 let omit: Vec<EntryId> = edits.iter().map(|edit| edit.target).collect();
                 assert!(edits.iter().all(|edit| serde_json::to_value(edit).unwrap()["action"] == "omit"));
@@ -164,7 +164,7 @@ async fn propagates_section_errors_after_cancellation() {
 fn replays_sections_in_place_deletes_on_null_and_appends_re_additions() {
     let system = |sections: Value| {
         let sections = sections.as_object().cloned();
-        Message::System(SystemMessage {
+        Message::from(SystemMessage {
             content: UserContent::Text(String::new()),
             sections,
             tools_added: None,
@@ -277,14 +277,14 @@ async fn apply_tools(conversation: &Conversation, tools: &[Tool], wanted: &[(&st
         .map(|draft| {
             let message = system_of(draft);
             let mut changes = json!({});
-            if let Some(removed) = message.tools_removed {
+            if let Some(removed) = &message.tools_removed {
                 changes["removed"] = json!(removed.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>());
             }
-            if let Some(added) = message.tools_added {
+            if let Some(added) = &message.tools_added {
                 changes["added"] = json!(added.iter().map(|tool| tool.name.clone()).collect::<Vec<_>>());
             }
-            if let Some(sections) = message.sections {
-                changes["sections"] = Value::Object(sections);
+            if let Some(sections) = &message.sections {
+                changes["sections"] = json!(sections);
             }
             changes.to_string()
         })

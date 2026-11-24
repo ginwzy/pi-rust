@@ -238,7 +238,7 @@ async fn streams_thinking_tool_calls_images_usage_and_aborts() {
             "usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 5, "thoughtsTokenCount": 5, "totalTokenCount": 60}})),
     ])])
     .await;
-    let user = Message::User(crate::types::UserMessage {
+    let user = Message::from(crate::types::UserMessage {
         input_id: None,
         content: crate::types::UserContent::Blocks(vec![
             crate::types::ContentBlock::text("what is this"),

@@ -54,7 +54,7 @@ pub struct FailedRequest {
     pub model: Model,
     pub thinking_level: Option<ThinkingLevel>,
     /// Carries `stop_reason` and `error_message`.
-    pub message: AssistantMessage,
+    pub message: std::sync::Arc<AssistantMessage>,
 }
 
 /// Input of [`ModelRouter::route`] (upstream `ModelRouteRequest`).
@@ -95,7 +95,7 @@ impl ModelRouteRequest {
         }
         if let Some(failed) = &self.failed {
             let mut value = routed(&failed.model, failed.thinking_level);
-            value["message"] = json!(Message::Assistant(failed.message.clone()));
+            value["message"] = json!(Message::from(failed.message.clone()));
             object.insert("failed".into(), value);
         }
         if let Some(state) = &self.state {
@@ -198,7 +198,7 @@ pub fn is_virtual_message(message: &AssistantMessage) -> bool {
 pub fn find_latest_response(messages: &[Message]) -> Option<&AssistantMessage> {
     messages.iter().rev().find_map(|message| match message {
         Message::Assistant(assistant) if !matches!(assistant.stop_reason, StopReason::Error | StopReason::Aborted) => {
-            Some(assistant)
+            Some(assistant.as_ref())
         }
         _ => None,
     })

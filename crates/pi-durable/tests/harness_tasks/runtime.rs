@@ -90,7 +90,7 @@ async fn rejects_runtime_operations_after_the_invocation_ends_and_stops_its_watc
 }
 
 fn user(text: &str) -> Message {
-    Message::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
+    Message::from(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: 1 })
 }
 
 #[tokio::test]

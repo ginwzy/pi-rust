@@ -24,7 +24,7 @@ fn virtual_model() -> Model {
 }
 
 fn answer(model: &Model, stop_reason: StopReason) -> Message {
-    Message::Assistant(AssistantMessage {
+    Message::from(AssistantMessage {
         api: model.api.clone(),
         provider: model.provider.clone(),
         model: model.id.clone(),
@@ -146,7 +146,7 @@ fn requests_serialize_in_the_upstream_shape() {
         failed: Some(FailedRequest {
             model: physical("large"),
             thinking_level: Some(ThinkingLevel::High),
-            message: failed,
+            message: failed.into(),
         }),
         state: Some(json!({"phase": "plan"})),
         messages: Vec::new(),

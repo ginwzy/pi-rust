@@ -324,10 +324,8 @@ async fn store_version_1(setup: &ChatSetup, directory: &tempfile::TempDir, check
     let id = root.id;
     let stage = move |tx: Tx| async move {
         let message = super::call_message("echo", json!({ "text": "old" }));
-        let draft = EntryDraft {
-            model: Some(vec![pi_ai::Message::Assistant(message)]),
-            ..EntryDraft::new(ASSISTANT_ENTRY.kind())
-        };
+        let draft =
+            EntryDraft { model: Some(vec![pi_ai::Message::from(message)]), ..EntryDraft::new(ASSISTANT_ENTRY.kind()) };
         let entry = tx.append_entry(id, draft).await?;
         let input = Json::from(json!({ "kind": "model", "assistant": entry.id, "callId": "c1" }));
         tx.create_task(tool_task(), input, TaskOptions::conversation(id)).await

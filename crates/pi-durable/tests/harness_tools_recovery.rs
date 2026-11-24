@@ -36,7 +36,7 @@ fn sqlite_path(directory: &tempfile::TempDir) -> String {
     directory.path().join("session.sqlite").to_string_lossy().into_owned()
 }
 
-fn results(entries: &[EntryRecord]) -> Vec<ToolResultMessage> {
+fn results(entries: &[EntryRecord]) -> Vec<Arc<ToolResultMessage>> {
     entries
         .iter()
         .filter(|entry| entry.kind == "pi.tool-result")

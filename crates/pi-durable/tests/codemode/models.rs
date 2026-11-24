@@ -130,7 +130,7 @@ fn models_chat() -> ModelsChat {
 struct Ran {
     text: String,
     details: CodemodeToolDetails,
-    content: Vec<ContentBlock>,
+    result: Arc<pi_ai::ToolResultMessage>,
     usage: Option<Json>,
 }
 
@@ -147,7 +147,7 @@ async fn run(chat: &ModelsChat, code: &str, env: Option<SharedEnv>) -> Ran {
     let usage = harness.snapshot(&USAGE_DOC, root.id, &ctx()).await.unwrap();
     harness.close(&ctx()).await.unwrap();
     let details = serde_json::from_value(result.details.clone().unwrap()).unwrap();
-    Ran { text: without_header(&text), details, content: result.content, usage }
+    Ran { text: without_header(&text), details, result, usage }
 }
 
 fn rows(details: &CodemodeToolDetails) -> Vec<(&str, CodemodeNestedCallStatus)> {
@@ -266,5 +266,5 @@ async fn notes_generated_images_the_script_did_not_show() {
         image(result.output[0]);"#;
     let shown = run(&models_chat(), code, None).await;
     assert!(!shown.text.contains("Note:"), "{}", shown.text);
-    assert!(shown.content.iter().any(|item| matches!(item, ContentBlock::Image { .. })));
+    assert!(shown.result.content.iter().any(|item| matches!(item, ContentBlock::Image { .. })));
 }

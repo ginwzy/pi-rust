@@ -159,7 +159,7 @@ mod tests {
             provider: "x".into(),
             ..AssistantMessage::default()
         };
-        let messages = vec![Message::user("first"), Message::Assistant(assistant), Message::user("second")];
+        let messages = vec![Message::user("first"), Message::from(assistant), Message::user("second")];
         let blocks = fresh(&messages, Some("Be brief"), &CAPS);
         let text = blocks[0]["resource"]["text"].as_str().unwrap();
         assert!(text.starts_with("# Pi session instructions\n\nBe brief\n\n---\n\n# Prior conversation"), "{text}");
@@ -180,8 +180,7 @@ mod tests {
             content: vec![ContentBlock::text("out")],
             ..ToolResultMessage::default()
         };
-        let messages =
-            vec![Message::user("a"), Message::Assistant(own), Message::ToolResult(result), Message::user("b")];
+        let messages = vec![Message::user("a"), Message::from(own), Message::from(result), Message::user("b")];
         let blocks = delta(&messages, 1, &CAPS);
         let text = blocks[0]["resource"]["text"].as_str().unwrap();
         assert!(!text.contains("mine") && text.contains("## Tool result (bash id=t1)"), "{text}");

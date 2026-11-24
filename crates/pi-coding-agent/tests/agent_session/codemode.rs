@@ -119,7 +119,7 @@ pub async fn codemode_harness(defaults: &[&str], tools: Vec<SharedTool>, options
 static NEXT_CALL: AtomicU64 = AtomicU64::new(1);
 
 /// Prompt once with a codemode call of `code` and return its result.
-pub async fn run(h: &Harness, code: &str) -> ToolResultMessage {
+pub async fn run(h: &Harness, code: &str) -> std::sync::Arc<ToolResultMessage> {
     let id = format!("cm{}", NEXT_CALL.fetch_add(1, Ordering::Relaxed));
     h.provider.push(FauxResponse::tool_call(&id, "codemode", json!({ "code": code })));
     h.provider.push(FauxResponse::text("done"));

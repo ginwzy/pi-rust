@@ -190,7 +190,7 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
         }
         "boundary" => {
             let session = runner.session().ok_or_else(|| error("No session"))?;
-            session.boundary_preview(&args.str(0)?, &args.json(1)).map_err(error)?
+            return session.boundary_preview(&args.str(0)?, &args.json(1)).map_err(error);
         }
         "clipboard" => {
             let text = args.str(0)?;

@@ -39,7 +39,7 @@ fn call(id: &str, signature: Option<&str>) -> ContentBlock {
 }
 
 fn assistant(source: &Model, content: Vec<ContentBlock>) -> Message {
-    Message::Assistant(AssistantMessage {
+    Message::from(AssistantMessage {
         content,
         api: source.api.clone(),
         provider: source.provider.clone(),
@@ -50,7 +50,7 @@ fn assistant(source: &Model, content: Vec<ContentBlock>) -> Message {
 }
 
 fn result(id: &str, content: Vec<ContentBlock>) -> Message {
-    Message::ToolResult(ToolResultMessage {
+    Message::from(ToolResultMessage {
         tool_call_id: id.into(),
         tool_name: "bash".into(),
         content,

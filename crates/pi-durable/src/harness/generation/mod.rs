@@ -398,7 +398,7 @@ pub(crate) async fn convert_partial(
     let Message::Assistant(mut message) = partial.deserialize_into()? else {
         return Err(DurableError::error("Committed partial is not an assistant message"));
     };
-    message.stop_reason = pi_ai::StopReason::Aborted;
+    std::sync::Arc::make_mut(&mut message).stop_reason = pi_ai::StopReason::Aborted;
     append_assistant(tx, conversation_id, &message).await?;
     Ok(())
 }
@@ -411,7 +411,7 @@ pub(crate) async fn append_assistant(
 ) -> DurableResult<EntryRecord> {
     let key = format!("{}/{}", message.provider, message.model);
     record_usage(tx, conversation_id, UsageBucket::Models, &key, &message.usage).await?;
-    let draft = TypedEntryDraft { model: Some(vec![Message::Assistant(message.clone())]), ..TypedEntryDraft::new(()) };
+    let draft = TypedEntryDraft { model: Some(vec![Message::from(message.clone())]), ..TypedEntryDraft::new(()) };
     Ok(tx.append_typed_entry(&ASSISTANT_ENTRY, conversation_id, draft).await?.record)
 }
 

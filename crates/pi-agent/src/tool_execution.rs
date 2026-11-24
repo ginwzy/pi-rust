@@ -19,7 +19,7 @@ use crate::types::{
 use crate::validate::validate_tool_arguments;
 
 pub(crate) struct ToolBatch {
-    pub messages: Vec<ToolResultMessage>,
+    pub messages: Vec<Arc<ToolResultMessage>>,
     /// Every result asked to end the run.
     pub terminate: bool,
 }
@@ -459,7 +459,7 @@ async fn emit_result(
     outcome: &AgentToolCallOutcome,
     runner: Option<&Arc<NestedToolCallRunner>>,
     emit: &EventSink,
-) -> ToolResultMessage {
+) -> Arc<ToolResultMessage> {
     let mut result = ToolResultMessage {
         tool_call_id: outcome.tool_call.id.clone(),
         tool_name: outcome.tool_call.name.clone(),
@@ -480,6 +480,7 @@ async fn emit_result(
             });
         }
     }
+    let result = Arc::new(result);
     match crate::agent_loop::emit_message(emit, Message::ToolResult(result.clone()), true).await {
         Message::ToolResult(replaced) => replaced,
         _ => result,

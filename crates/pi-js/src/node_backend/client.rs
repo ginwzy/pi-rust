@@ -9,7 +9,7 @@ use std::sync::{Mutex, OnceLock, RwLock, mpsc};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
-use serde_json::{Map, Value, json};
+use serde_json::json;
 
 use crate::error::JsError;
 use crate::host::HostValue;
@@ -77,29 +77,34 @@ impl NodeClient {
         self.next_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn write(&self, frame: &Value) -> Result<(), JsError> {
-        let mut line = frame.to_string();
-        line.push('\n');
+    pub fn write(&self, frame: &impl serde::Serialize) -> Result<(), JsError> {
+        let mut line = serde_json::to_vec(frame)?;
+        line.push(b'\n');
         let mut socket = lock(&self.socket);
         let socket = socket.as_mut().ok_or_else(shut_down)?;
-        socket.write_all(line.as_bytes()).map_err(|_| shut_down())
+        socket.write_all(&line).map_err(|_| shut_down())
     }
 
     /// Send `{t: "req", id, ...frame}`; the bridge hands the reply to `waiter`.
     pub fn send_request(
         &self,
         alive: &AtomicBool,
-        mut frame: Map<String, Value>,
+        frame: impl serde::Serialize,
         waiter: Waiter,
     ) -> Result<(), JsError> {
         if !alive.load(Ordering::SeqCst) {
             return Err(self.exited());
         }
         let id = self.next_id();
-        frame.insert("t".into(), json!("req"));
-        frame.insert("id".into(), json!(id));
+        #[derive(serde::Serialize)]
+        struct Request<F> {
+            t: &'static str,
+            id: u64,
+            #[serde(flatten)]
+            frame: F,
+        }
         lock(&self.pending).insert(id, waiter);
-        let written = self.write(&Value::Object(frame));
+        let written = self.write(&Request { t: "req", id, frame });
         if written.is_err() || !alive.load(Ordering::SeqCst) {
             if let Some(waiter) = lock(&self.pending).remove(&id) {
                 waiter.send(Err(self.exited()));

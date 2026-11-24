@@ -105,7 +105,7 @@ async fn summarizes_a_replaced_entrys_replacement_and_shows_it_to_the_hook() {
     let chat = open(OpenOptions::default()).await;
     chat.history().await;
     let u1 = all_entries(&chat.root).await[0].id;
-    let redacted = pi_ai::Message::User(pi_ai::UserMessage {
+    let redacted = pi_ai::Message::from(pi_ai::UserMessage {
         input_id: None,
         content: pi_ai::UserContent::Text("REDACTED".into()),
         timestamp: 0,

@@ -289,7 +289,7 @@ mod summary_tests {
         model.compat = Some(json!({"supportsMidConvoSystemMessages": true, "supportsAdditionalTools": true}));
         let tool = crate::types::Tool::new("read", "d", json!({"type": "object", "properties": {}}));
         let leading = crate::transcript::create_initial_system_message(Some("prompt"), &[tool]).unwrap();
-        let messages = [Message::System(leading), Message::user("hi")];
+        let messages = [Message::from(leading), Message::user("hi")];
         let body = build_body(&model, &messages, &StreamOptions::default(), None, &BTreeMap::new()).unwrap();
         assert!(body.get("tools").is_none());
         assert_eq!(body["instructions"], "prompt");

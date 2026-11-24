@@ -13,8 +13,8 @@ use crate::types::AgentEvent;
 /// A completed turn: the assistant message, its tool results, and the context after both.
 #[derive(Clone, Copy)]
 pub struct AgentTurnContext<'a> {
-    pub message: &'a AssistantMessage,
-    pub tool_results: &'a [ToolResultMessage],
+    pub message: &'a Arc<AssistantMessage>,
+    pub tool_results: &'a [Arc<ToolResultMessage>],
     /// Context after the turn's assistant message and tool results were appended.
     pub context: &'a AgentContext,
     /// What the loop returns if it exits now. Prompt runs include the prompts;
