@@ -47,6 +47,21 @@ pub struct CacheWarmRequest {
 /// False once the session's model or messages no longer match the request.
 pub type IsCurrentFn = Arc<dyn Fn() -> bool + Send + Sync>;
 
+fn replay_schedule(model: &Model, options: &StreamOptions) -> Result<(Duration, Duration), &'static str> {
+    if !is_replayable(model, options) {
+        return Err("request cannot be replayed safely");
+    }
+    let Some(ttl) = prompt_cache_ttl(model, options) else {
+        return Err(if options.cache_retention == Some(pi_ai::CacheRetention::None) {
+            "request disabled prompt caching"
+        } else {
+            "cache lifetime unavailable"
+        });
+    };
+    let delay = cache_warming_delay(ttl).ok_or("cache lifetime unavailable")?;
+    Ok((ttl, delay))
+}
+
 struct ActiveRun {
     id: u64,
     request: CacheWarmRequest,
@@ -132,31 +147,40 @@ impl CacheWarmer {
 
     /// Keep the cache entry `request` writes warm while `is_current` holds.
     pub fn start(&self, request: CacheWarmRequest, is_current: IsCurrentFn) {
+        self.start_with(replay_schedule(&request.model, &request.options), is_current, || request);
+    }
+
+    pub(crate) fn start_lazy(
+        &self,
+        model: &Model,
+        options: &StreamOptions,
+        is_current: IsCurrentFn,
+        request: impl FnOnce() -> CacheWarmRequest,
+    ) {
+        self.start_with(replay_schedule(model, options), is_current, request);
+    }
+
+    fn start_with(
+        &self,
+        schedule: Result<(Duration, Duration), &'static str>,
+        is_current: IsCurrentFn,
+        request: impl FnOnce() -> CacheWarmRequest,
+    ) {
         let mut inner = self.lock();
         clear(&mut inner);
         if self.host.mode() == CacheWarmingMode::Off {
             return stop(&mut inner, "cache warming disabled", None);
         }
-        if !is_replayable(&request.model, &request.options) {
-            return stop(&mut inner, "request cannot be replayed safely", None);
-        }
-        let Some(ttl) = prompt_cache_ttl(&request.model, &request.options) else {
-            let reason = if request.options.cache_retention == Some(pi_ai::CacheRetention::None) {
-                "request disabled prompt caching"
-            } else {
-                "cache lifetime unavailable"
-            };
-            return stop(&mut inner, reason, None);
-        };
-        let Some(delay) = cache_warming_delay(ttl) else {
-            return stop(&mut inner, "cache lifetime unavailable", None);
+        let (ttl, delay) = match schedule {
+            Ok(schedule) => schedule,
+            Err(reason) => return stop(&mut inner, reason, None),
         };
         let id = inner.next_id;
         inner.next_id += 1;
         let now = Instant::now();
         inner.run = Some(ActiveRun {
             id,
-            request,
+            request: request(),
             is_current,
             ttl,
             delay,

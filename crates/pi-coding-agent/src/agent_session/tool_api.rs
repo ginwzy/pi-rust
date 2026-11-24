@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use pi_agent::{SharedTool, ToolRegistry};
-use pi_ai::transcript::{current_system_message, current_tools, tool_state_changes};
+use pi_ai::transcript::{current_tools, tool_state_changes};
 use pi_ai::{Message, SystemMessage, UserContent};
 
 use super::tools::{ActiveSelection, ToolInfo, ToolSource, default_tool_names, prompt_options};
@@ -195,11 +195,11 @@ impl AgentSession {
     }
 
     /// Apply the loadout of `options` and return a system message patching the prompt sections and
-    /// tool declarations the model has (replayed from `messages`), or `None` when nothing changed.
+    /// tool declarations the model has, or `None` when nothing changed.
     pub(crate) fn prepare_prompt_and_tool_loadout(
         &self,
         options: &BuildSystemPromptOptions,
-        messages: &[Message],
+        current: Option<SystemMessage>,
     ) -> Option<SystemMessage> {
         let mut options = options.clone();
         let declared: Vec<pi_ai::Tool> = {
@@ -209,11 +209,10 @@ impl AgentSession {
             tools.registry.active_tools().iter().map(|tool| tool.declaration()).collect()
         };
         self.sync_agent_tools();
-        let current = current_system_message(messages);
-        let previous = current.and_then(|system| system.sections).unwrap_or_default();
+        let (previous, tools) = current.map(|system| (system.sections, system.tools_added)).unwrap_or_default();
         let wanted = build_system_prompt_sections(&options).unwrap_or_default();
-        let sections = diff_system_prompt_sections(&previous, &wanted);
-        let (added, removed) = tool_state_changes(&current_tools(messages), &declared);
+        let sections = diff_system_prompt_sections(&previous.unwrap_or_default(), &wanted);
+        let (added, removed) = tool_state_changes(tools.as_deref().unwrap_or_default(), &declared);
         if sections.is_none() && added.is_empty() && removed.is_empty() {
             return None;
         }

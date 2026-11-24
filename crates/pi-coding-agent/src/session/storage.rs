@@ -1,12 +1,13 @@
 //! Reading session files: JSONL parsing, header discovery, and v1/v2 migration.
 
 use std::collections::HashSet;
-use std::io::{Read, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::entry::{CURRENT_SESSION_VERSION, FileEntry, SessionHeader};
+use super::entry::{CURRENT_SESSION_VERSION, Entry, FileEntry, SessionHeader};
 use super::ids::{generate_entry_id, resolve_path};
 
 /// Header discovery reads at most this much before giving up on a file.
@@ -51,16 +52,29 @@ pub fn header_from_raw(raw: &FileEntry) -> Option<SessionHeader> {
 /// All lines of a session file. Empty when the file is missing or its first parsed line is not
 /// a session header. A valid file missing its final newline gets one appended.
 pub fn load_entries_from_file(path: &Path) -> Vec<FileEntry> {
-    let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
-    let mut lines: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
-    let pending = lines.pop().unwrap_or_default();
-    let mut entries: Vec<FileEntry> = lines.into_iter().filter_map(parse_line).collect();
-    entries.extend(parse_line(pending));
-    if entries.first().is_none_or(|first| !is_header(first)) {
-        return Vec::new();
+    let Ok(file) = File::open(path) else { return Vec::new() };
+    let mut reader = BufReader::new(file);
+    let mut entries = Vec::new();
+    let mut line = Vec::new();
+    let mut missing_newline = false;
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => return Vec::new(),
+        }
+        missing_newline = !line.ends_with(b"\n");
+        if let Some(entry) = parse_line(&line) {
+            if entries.is_empty() && !is_header(&entry) {
+                return Vec::new();
+            }
+            entries.push(entry);
+        }
     }
-    if !pending.is_empty()
-        && let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(path)
+    if !entries.is_empty()
+        && missing_newline
+        && let Ok(mut file) = OpenOptions::new().append(true).open(path)
     {
         let _ = file.write_all(b"\n");
     }
@@ -192,30 +206,32 @@ pub fn migrate_session_entries(entries: &mut [FileEntry]) -> bool {
     true
 }
 
-/// Write `lines` as JSONL, replacing the file (or failing if `create_new` and it exists).
-pub(crate) fn write_lines(path: &Path, lines: &[String], create_new: bool) -> anyhow::Result<()> {
+/// Write JSONL, replacing the file (or failing if `create_new` and it exists).
+pub(crate) fn write_lines(
+    path: &Path,
+    create_new: bool,
+    write: impl FnOnce(&mut BufWriter<File>) -> io::Result<()>,
+) -> anyhow::Result<()> {
     if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
-    let mut options = std::fs::OpenOptions::new();
+    let mut options = OpenOptions::new();
     options.write(true);
     if create_new {
         options.create_new(true);
     } else {
         options.create(true).truncate(true);
     }
-    let mut file = options.open(path)?;
-    let mut text = String::new();
-    for line in lines {
-        text.push_str(line);
-        text.push('\n');
-    }
-    file.write_all(text.as_bytes())?;
+    let mut writer = BufWriter::new(options.open(path)?);
+    write(&mut writer)?;
+    writer.flush()?;
     Ok(())
 }
 
-pub(crate) fn append_line(path: &Path, line: &str) -> anyhow::Result<()> {
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-    file.write_all(format!("{line}\n").as_bytes())?;
+pub(crate) fn append_line(path: &Path, entry: &Entry) -> anyhow::Result<()> {
+    let mut line = entry.to_json_line();
+    line.push('\n');
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    file.write_all(line.as_bytes())?;
     Ok(())
 }

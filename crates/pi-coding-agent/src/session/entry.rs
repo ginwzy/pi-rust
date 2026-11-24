@@ -1,10 +1,12 @@
 //! Session file lines. Each [`Entry`] keeps its JSON object exactly as stored, so files
 //! written by the TypeScript pi round-trip unchanged, plus a typed view of its fields.
 
+use std::io::{self, Write};
+use std::sync::Arc;
+
 use pi_ai::{Message, SystemMessage, Usage, UserContent};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
-use std::sync::Arc;
 
 /// One raw JSON line of a session file (header or entry), in stored key order.
 pub type FileEntry = Map<String, Value>;
@@ -175,7 +177,7 @@ fn normalize_usage(value: &mut Value) {
 /// Parse a stored message, filling fields that older or hand-edited files may lack,
 /// as upstream `sessionEntryToContextMessages` tolerates missing content.
 pub fn parse_message_lenient(value: &Value) -> Option<Message> {
-    if let Ok(message) = serde_json::from_value::<Message>(value.clone()) {
+    if let Ok(message) = Message::from_value(value) {
         return Some(message);
     }
     let mut object = value.as_object()?.clone();
@@ -231,6 +233,10 @@ impl Entry {
     pub fn from_raw(raw: FileEntry) -> Self {
         let kind = string_field(&raw, "type").unwrap_or_default();
         let data = parse_data(&kind, &raw);
+        Self::from_parts(raw, kind, data)
+    }
+
+    fn from_parts(raw: FileEntry, kind: String, data: EntryData) -> Self {
         Self {
             id: string_field(&raw, "id").unwrap_or_default(),
             parent_id: string_field(&raw, "parentId"),
@@ -243,9 +249,12 @@ impl Entry {
 
     /// Build an entry from `(key, value)` pairs in write order; `None` values are left out.
     pub(crate) fn build(fields: Vec<(&str, Option<Value>)>) -> Self {
-        Self::from_raw(
-            fields.into_iter().filter_map(|(key, value)| value.map(|value| (key.to_string(), value))).collect(),
-        )
+        Self::from_raw(collect_fields(fields))
+    }
+
+    pub(crate) fn build_message(mut fields: Vec<(&str, Option<Value>)>, message: &Message) -> serde_json::Result<Self> {
+        fields.push(("message", Some(serde_json::to_value(message)?)));
+        Ok(Self::from_parts(collect_fields(fields), "message".into(), EntryData::Message(message.clone())))
     }
 
     /// The entry `type`, such as `message` or `compaction`.
@@ -333,11 +342,19 @@ impl Entry {
     pub fn to_json_line(&self) -> String {
         serde_json::to_string(self.raw()).unwrap_or_default()
     }
+
+    /// Serialize the stored object without a trailing line feed.
+    pub fn write_json_line(&self, writer: &mut impl Write) -> io::Result<()> {
+        serde_json::to_writer(writer, self.raw()).map_err(io::Error::from)
+    }
+}
+
+fn collect_fields(fields: Vec<(&str, Option<Value>)>) -> FileEntry {
+    fields.into_iter().filter_map(|(key, value)| value.map(|value| (key.to_string(), value))).collect()
 }
 
 fn parse_data(kind: &str, raw: &FileEntry) -> EntryData {
-    let object = Value::Object(raw.clone());
-    let parse = |value: &Value| -> Option<EntryData> {
+    let parse = || -> Option<EntryData> {
         Some(match kind {
             "message" => EntryData::Message(parse_message_lenient(raw.get("message")?)?),
             "thinking_level_change" => {
@@ -347,17 +364,17 @@ fn parse_data(kind: &str, raw: &FileEntry) -> EntryData {
                 provider: string_field(raw, "provider")?,
                 model_id: string_field(raw, "modelId")?,
             },
-            "usage" => EntryData::Usage(serde_json::from_value(value.clone()).ok()?),
-            "compaction" => EntryData::Compaction(serde_json::from_value(value.clone()).ok()?),
-            "branch_summary" => EntryData::BranchSummary(serde_json::from_value(value.clone()).ok()?),
+            "usage" => EntryData::Usage(UsageEntry::deserialize(raw).ok()?),
+            "compaction" => EntryData::Compaction(CompactionEntry::deserialize(raw).ok()?),
+            "branch_summary" => EntryData::BranchSummary(BranchSummaryEntry::deserialize(raw).ok()?),
             "custom" => EntryData::Custom {
                 custom_type: string_field(raw, "customType").unwrap_or_default(),
                 data: raw.get("data").cloned(),
             },
-            "custom_message" => EntryData::CustomMessage(serde_json::from_value(value.clone()).ok()?),
+            "custom_message" => EntryData::CustomMessage(CustomMessageEntry::deserialize(raw).ok()?),
             "context_edit" => EntryData::ContextEdit {
                 target_id: string_field(raw, "targetId")?,
-                replacement: raw.get("replacement").and_then(|value| serde_json::from_value(value.clone()).ok()),
+                replacement: raw.get("replacement").and_then(|value| ContextReplacement::deserialize(value).ok()),
             },
             "label" => {
                 EntryData::Label { target_id: string_field(raw, "targetId")?, label: string_field(raw, "label") }
@@ -366,7 +383,7 @@ fn parse_data(kind: &str, raw: &FileEntry) -> EntryData {
             _ => return None,
         })
     };
-    parse(&object).unwrap_or(EntryData::Other)
+    parse().unwrap_or(EntryData::Other)
 }
 
 #[cfg(test)]

@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use pi_ai::{ContentBlock, Message, ThinkingLevel, UserContent};
+use pi_ai::transcript::replay_system_messages;
+use pi_ai::{ContentBlock, Message, SystemMessage, ThinkingLevel, UserContent};
+use serde::Deserialize;
 use serde_json::Value;
 
 use super::entry::{ContextReplacement, Entry, EntryData};
@@ -123,39 +125,45 @@ pub(crate) fn context_entries_of_path(path: Vec<&Entry>) -> Vec<&Entry> {
 
 /// Messages one entry contributes to context, before context edits.
 pub fn session_entry_to_context_messages(entry: &Entry) -> Vec<Message> {
+    let mut messages = Vec::new();
+    visit_messages(entry, |message| messages.push(message));
+    messages
+}
+
+fn visit_messages(entry: &Entry, mut emit: impl FnMut(Message)) {
     match entry.data() {
-        EntryData::Message(message) => vec![message.clone()],
-        EntryData::CustomMessage(custom) => vec![create_custom_message(
+        EntryData::Message(message) => emit(message.clone()),
+        EntryData::CustomMessage(custom) => emit(create_custom_message(
             &custom.custom_type,
             custom.content.clone(),
             custom.display,
             custom.details.clone(),
             entry.timestamp(),
-        )],
+        )),
         EntryData::BranchSummary(summary) if !summary.summary.is_empty() => {
-            vec![create_branch_summary_message(&summary.summary, &summary.from_id, entry.timestamp())]
+            emit(create_branch_summary_message(&summary.summary, &summary.from_id, entry.timestamp()));
         }
         EntryData::Compaction(compaction) => {
-            let summary =
-                create_compaction_summary_message(&compaction.summary, compaction.tokens_before, entry.timestamp());
-            compaction.system_message.clone().map(Message::System).into_iter().chain([summary]).collect()
+            if let Some(system) = &compaction.system_message {
+                emit(Message::System(system.clone()));
+            }
+            emit(create_compaction_summary_message(&compaction.summary, compaction.tokens_before, entry.timestamp()));
         }
-        _ => Vec::new(),
+        _ => {}
     }
 }
 
 fn block_content(content: &Value) -> Vec<ContentBlock> {
     match content {
         Value::String(text) => vec![ContentBlock::text(text.clone())],
-        other => serde_json::from_value(other.clone()).unwrap_or_default(),
+        other => Vec::deserialize(other).unwrap_or_default(),
     }
 }
 
 fn replace_content(message: Message, replacement: &ContextReplacement) -> Message {
     match message {
         Message::User(mut user) => {
-            user.content =
-                serde_json::from_value(replacement.content.clone()).unwrap_or(UserContent::Blocks(Vec::new()));
+            user.content = UserContent::deserialize(&replacement.content).unwrap_or(UserContent::Blocks(Vec::new()));
             Message::User(user)
         }
         Message::Assistant(mut assistant) => {
@@ -174,11 +182,64 @@ fn replace_content(message: Message, replacement: &ContextReplacement) -> Messag
     }
 }
 
-fn project_entry(entry: &Entry, edit: Option<&Entry>) -> Vec<Message> {
-    let messages = session_entry_to_context_messages(entry);
-    let Some(EntryData::ContextEdit { replacement, .. }) = edit.map(Entry::data) else { return messages };
-    let Some(replacement) = replacement else { return Vec::new() };
-    messages.into_iter().map(|message| replace_content(message, replacement)).collect()
+struct Source<'a> {
+    entry: &'a Entry,
+    omitted: bool,
+    replacement: Option<&'a ContextReplacement>,
+}
+
+impl Source<'_> {
+    fn append_messages(&self, messages: &mut Vec<Message>) {
+        if self.omitted {
+            return;
+        }
+        visit_messages(self.entry, |message| {
+            messages.push(match self.replacement {
+                Some(replacement) => replace_content(message, replacement),
+                None => message,
+            });
+        });
+    }
+}
+
+fn context_sources(path: Vec<&Entry>) -> impl Iterator<Item = Source<'_>> {
+    let selected = context_entries_of_path(path);
+    let edits: HashMap<_, _> = selected
+        .iter()
+        .filter_map(|entry| match entry.data() {
+            EntryData::ContextEdit { target_id, replacement } => Some((target_id.as_str(), replacement.as_ref())),
+            _ => None,
+        })
+        .collect();
+    selected.into_iter().enumerate().map(move |(index, entry)| {
+        let edit = edits.get(entry.id()).copied();
+        Source {
+            entry,
+            omitted: matches!(edit, Some(None)) || (index > 0 && entry.compaction().is_some()),
+            replacement: edit.flatten(),
+        }
+    })
+}
+
+pub(crate) fn has_context_messages(path: Vec<&Entry>) -> bool {
+    context_sources(path).any(|source| {
+        !source.omitted
+            && match source.entry.data() {
+                EntryData::Message(_) | EntryData::CustomMessage(_) | EntryData::Compaction(_) => true,
+                EntryData::BranchSummary(summary) => !summary.summary.is_empty(),
+                _ => false,
+            }
+    })
+}
+
+pub(crate) fn current_system_message(path: Vec<&Entry>) -> Option<SystemMessage> {
+    replay_system_messages(context_sources(path).filter(|source| !source.omitted).filter_map(|source| {
+        match source.entry.data() {
+            EntryData::Message(Message::System(system)) => Some(system),
+            EntryData::Compaction(compaction) => compaction.system_message.as_ref(),
+            _ => None,
+        }
+    }))
 }
 
 /// Model and thinking level from the whole path, as upstream `getSessionContextSettings`.
@@ -189,14 +250,14 @@ pub fn context_settings(path: &[&Entry]) -> (Option<(String, String)>, Option<Th
             EntryData::ThinkingLevelChange { thinking_level: level } => {
                 thinking_level = level.parse::<ThinkingLevel>().ok().or(thinking_level);
             }
-            EntryData::ModelChange { provider, model_id } => model = Some((provider.clone(), model_id.clone())),
+            EntryData::ModelChange { provider, model_id } => model = Some((provider, model_id)),
             EntryData::Message(Message::Assistant(assistant)) => {
-                model = Some((assistant.provider.clone(), assistant.model.clone()));
+                model = Some((&assistant.provider, &assistant.model));
             }
             _ => {}
         }
     }
-    (model, thinking_level)
+    (model.map(|(provider, model)| (provider.clone(), model.clone())), thinking_level)
 }
 
 /// Provenance-preserving, compaction-aware model context for `leaf`.
@@ -206,24 +267,11 @@ pub fn build_session_projection<'a>(entries: &'a [Entry], leaf: Leaf<'_>) -> Ses
 
 pub(crate) fn project_path(path: Vec<&Entry>) -> SessionProjection<'_> {
     let (model, thinking_level) = context_settings(&path);
-    let selected = context_entries_of_path(path);
-    let mut edits: HashMap<&str, &Entry> = HashMap::new();
-    for entry in &selected {
-        if let EntryData::ContextEdit { target_id, .. } = entry.data() {
-            edits.insert(target_id.as_str(), entry);
-        }
-    }
-    let entries: Vec<ProjectedEntry> = selected
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| ProjectedEntry {
-            source: entry,
-            // Only the newest compaction, projected first, contributes a checkpoint and summary.
-            messages: if entry.compaction().is_some() && index > 0 {
-                Vec::new()
-            } else {
-                project_entry(entry, edits.get(entry.id()).copied())
-            },
+    let entries: Vec<ProjectedEntry> = context_sources(path)
+        .map(|source| {
+            let mut messages = Vec::new();
+            source.append_messages(&mut messages);
+            ProjectedEntry { source: source.entry, messages }
         })
         .collect();
     let messages = entries.iter().flat_map(|entry| entry.messages.iter().cloned()).collect();
@@ -232,5 +280,14 @@ pub(crate) fn project_path(path: Vec<&Entry>) -> SessionProjection<'_> {
 
 /// The finalized model context for `leaf`.
 pub fn build_session_context(entries: &[Entry], leaf: Leaf<'_>) -> SessionContext {
-    build_session_projection(entries, leaf).into_context()
+    build_context_of_path(build_session_path(entries, leaf))
+}
+
+pub(crate) fn build_context_of_path(path: Vec<&Entry>) -> SessionContext {
+    let (model, thinking_level) = context_settings(&path);
+    let mut messages = Vec::new();
+    for source in context_sources(path) {
+        source.append_messages(&mut messages);
+    }
+    SessionContext { messages, model, thinking_level }
 }

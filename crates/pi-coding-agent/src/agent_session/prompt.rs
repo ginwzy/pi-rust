@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use pi_ai::transcript::current_system_message;
 use pi_ai::{ContentBlock, Message, UserContent, UserMessage};
 use tokio_util::sync::CancellationToken;
 
@@ -311,7 +312,8 @@ impl AgentSession {
         };
         messages.append(&mut lock(&self.state).pending_next_turn);
         messages.extend(extra);
-        let update = self.prepare_prompt_and_tool_loadout(&prompt_options, &self.messages());
+        let current = self.with_state(|state| current_system_message(&state.messages));
+        let update = self.prepare_prompt_and_tool_loadout(&prompt_options, current);
         lock(&self.state).run_prompt = Some(prompt_options);
         if let Some(update) = update {
             messages.insert(0, Message::System(update));

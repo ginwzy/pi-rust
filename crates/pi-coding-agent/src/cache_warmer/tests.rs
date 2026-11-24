@@ -294,6 +294,21 @@ async fn stops_for_unsupported_requests_context_and_mode_changes() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn lazy_request_is_not_built_until_it_can_be_scheduled() {
+    let fake = host(CacheWarmingMode::Off, 100_000, None, ok_reply());
+    let warmer = CacheWarmer::new(fake.clone());
+    let model = adaptive();
+    let options = StreamOptions::default();
+    warmer.start_lazy(&model, &options, current(), || panic!("disabled request was built"));
+
+    *fake.mode.lock().unwrap() = CacheWarmingMode::Idle;
+    let disabled = StreamOptions { cache_retention: Some(CacheRetention::None), ..StreamOptions::default() };
+    warmer.start_lazy(&model, &disabled, current(), || panic!("uncacheable request was built"));
+    warmer.start_lazy(&model, &options, current(), || request(model.clone(), options.clone()));
+    assert_eq!(warmer.status().state, CacheWarmingState::Scheduled);
+}
+
+#[tokio::test(start_paused = true)]
 async fn idle_warming_ends_at_the_safety_limit() {
     let fake = host(CacheWarmingMode::Idle, 400_000, None, ok_reply());
     let warmer = CacheWarmer::new(fake.clone());

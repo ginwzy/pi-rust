@@ -3,6 +3,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::de::Error as _;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -355,30 +357,62 @@ pub enum Message {
     Custom(CustomMessage),
 }
 
-#[allow(clippy::large_enum_variant)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(tag = "role", rename_all = "camelCase")]
-enum KnownMessage {
-    System(SystemMessage),
-    User(UserMessage),
-    Assistant(AssistantMessage),
-    ToolResult(ToolResultMessage),
+enum KnownMessageRef<'a> {
+    System(&'a SystemMessage),
+    User(&'a UserMessage),
+    Assistant(&'a AssistantMessage),
+    ToolResult(&'a ToolResultMessage),
+}
+
+enum KnownRole {
+    System,
+    User,
+    Assistant,
+    ToolResult,
+}
+
+impl KnownRole {
+    fn of(role: &str) -> Option<Self> {
+        Some(match role {
+            "system" => Self::System,
+            "user" => Self::User,
+            "assistant" => Self::Assistant,
+            "toolResult" => Self::ToolResult,
+            _ => return None,
+        })
+    }
+
+    fn decode<'de, D: serde::Deserializer<'de>>(self, object: D) -> Result<Message, D::Error> {
+        match self {
+            Self::System => SystemMessage::deserialize(object).map(Message::System),
+            Self::User => UserMessage::deserialize(object).map(Message::User),
+            Self::Assistant => AssistantMessage::deserialize(object).map(Message::Assistant),
+            Self::ToolResult => ToolResultMessage::deserialize(object).map(Message::ToolResult),
+        }
+    }
+}
+
+fn message_role(object: &Map<String, Value>) -> Result<&str, serde_json::Error> {
+    object.get("role").and_then(Value::as_str).ok_or_else(|| serde_json::Error::missing_field("role"))
 }
 
 impl Serialize for Message {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let known = match self {
-            Self::System(message) => KnownMessage::System(message.clone()),
-            Self::User(message) => KnownMessage::User(message.clone()),
-            Self::Assistant(message) => KnownMessage::Assistant(message.clone()),
-            Self::ToolResult(message) => KnownMessage::ToolResult(message.clone()),
+            Self::System(message) => KnownMessageRef::System(message),
+            Self::User(message) => KnownMessageRef::User(message),
+            Self::Assistant(message) => KnownMessageRef::Assistant(message),
+            Self::ToolResult(message) => KnownMessageRef::ToolResult(message),
             Self::Custom(custom) => {
-                let mut object = Map::with_capacity(custom.fields.len() + 1);
-                object.insert("role".into(), Value::String(custom.role.clone()));
-                object.extend(
-                    custom.fields.iter().filter(|(key, _)| *key != "role").map(|(k, v)| (k.clone(), v.clone())),
-                );
-                return object.serialize(serializer);
+                let len = custom.fields.len() + usize::from(!custom.fields.contains_key("role"));
+                let mut object = serializer.serialize_map(Some(len))?;
+                object.serialize_entry("role", &custom.role)?;
+                for (key, value) in custom.fields.iter().filter(|(key, _)| *key != "role") {
+                    object.serialize_entry(key, value)?;
+                }
+                return object.end();
             }
         };
         known.serialize(serializer)
@@ -387,24 +421,35 @@ impl Serialize for Message {
 
 impl<'de> Deserialize<'de> for Message {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
         let mut object = Map::deserialize(deserializer)?;
-        let role = object.get("role").and_then(Value::as_str).ok_or_else(|| D::Error::missing_field("role"))?;
-        if !matches!(role, "system" | "user" | "assistant" | "toolResult") {
-            let role = role.to_string();
-            object.remove("role");
-            return Ok(Self::Custom(CustomMessage { role, fields: object }));
+        if let Some(known) = KnownRole::of(message_role(&object).map_err(D::Error::custom)?) {
+            return known.decode(object).map_err(D::Error::custom);
         }
-        Ok(match serde_json::from_value(Value::Object(object)).map_err(D::Error::custom)? {
-            KnownMessage::System(message) => Self::System(message),
-            KnownMessage::User(message) => Self::User(message),
-            KnownMessage::Assistant(message) => Self::Assistant(message),
-            KnownMessage::ToolResult(message) => Self::ToolResult(message),
-        })
+        let Some(Value::String(role)) = object.shift_remove("role") else {
+            return Err(D::Error::missing_field("role"));
+        };
+        Ok(Self::Custom(CustomMessage { role, fields: object }))
     }
 }
 
 impl Message {
+    /// Decode a borrowed JSON object without copying a temporary value tree.
+    pub fn from_value(value: &Value) -> Result<Self, serde_json::Error> {
+        let object = value.as_object().ok_or_else(|| serde_json::Error::custom("expected a message object"))?;
+        let role = message_role(object)?;
+        match KnownRole::of(role) {
+            Some(known) => known.decode(object),
+            None => {
+                let fields = object
+                    .iter()
+                    .filter(|(key, _)| *key != "role")
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+                Ok(Self::Custom(CustomMessage::new(role, fields)))
+            }
+        }
+    }
+
     pub fn user(text: impl Into<String>) -> Self {
         Self::User(UserMessage { input_id: None, content: UserContent::Text(text.into()), timestamp: now_ms() })
     }
@@ -614,6 +659,34 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_messages_keep_field_order_and_a_single_role() {
+        let input = r#"{"command":"ls","output":"a","role":"bashExecution","exitCode":0,"timestamp":4}"#;
+        let expected = r#"{"role":"bashExecution","command":"ls","output":"a","exitCode":0,"timestamp":4}"#;
+        let value = serde_json::from_str(input).unwrap();
+        let mut message: Message = serde_json::from_str(input).unwrap();
+        assert_eq!(Message::from_value(&value).unwrap(), message);
+        assert_eq!(serde_json::to_string(&message).unwrap(), expected);
+        let Message::Custom(custom) = &mut message else { panic!("expected custom") };
+        custom.fields.insert("role".into(), Value::String("ignored".into()));
+        assert_eq!(serde_json::to_string(&message).unwrap(), expected);
+    }
+
+    #[test]
+    fn known_message_codecs_agree_and_preserve_json_shape() {
+        for json in [
+            r#"{"role":"system","content":"prompt","sections":{"one":"a","two":"b"},"timestamp":1}"#,
+            r#"{"role":"user","content":"hello","timestamp":2}"#,
+            r#"{"role":"assistant","content":[],"api":"test","provider":"test","model":"m","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0.0,"output":0.0,"cacheRead":0.0,"cacheWrite":0.0,"total":0.0}},"stopReason":"stop","timestamp":3}"#,
+            r#"{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[],"isError":false,"timestamp":4}"#,
+        ] {
+            let value = serde_json::from_str(json).unwrap();
+            let message: Message = serde_json::from_str(json).unwrap();
+            assert_eq!(Message::from_value(&value).unwrap(), message);
+            assert_eq!(serde_json::to_string(&message).unwrap(), json);
+        }
+    }
 
     #[test]
     fn messages_round_trip_with_upstream_field_names() {

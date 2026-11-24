@@ -11,6 +11,7 @@ use pi_agent::{
     CallableToolsFn, ConvertToLlmFn, FinishTurnFn, PrepareNextTurnFn, PrepareRequestFn, TransformContextFn,
 };
 use pi_ai::Message;
+use pi_ai::transcript::current_system_message;
 
 use super::{AgentSession, lock};
 use crate::images::{ProcessImageOptions, block_images, normalize_tool_result_images};
@@ -30,7 +31,7 @@ impl AgentSession {
         self.mcp_turn_start().await;
         let options = self.effective_prompt_options();
         let context = self.projected_context();
-        let update = self.prepare_prompt_and_tool_loadout(&options, &context.messages);
+        let update = self.prepare_prompt_and_tool_loadout(&options, current_system_message(&context.messages));
         let (model, thinking_level) = self.with_state(|state| (state.model.clone(), state.thinking_level));
         AgentLoopTurnUpdate {
             context: Some(context),

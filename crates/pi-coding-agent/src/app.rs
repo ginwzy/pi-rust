@@ -262,7 +262,7 @@ async fn create_runtime_parts(
         thinking: options.thinking,
         models: options.models.as_deref(),
         inline_api_key: options.api_key.is_some(),
-        has_existing_session: !target.session_manager.build_session_context().messages.is_empty(),
+        has_existing_session: target.session_manager.has_context_messages(),
     };
     let choice = setup::choose_cli_model(&inputs, &services.settings, services.model_runtime.as_ref());
     diagnostics.extend(choice.warnings.iter().map(RuntimeDiagnostic::warning));

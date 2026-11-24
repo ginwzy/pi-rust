@@ -1,6 +1,7 @@
 //! Copying sessions: fork into another project, export the current branch as JSONL, import
 //! a JSONL file, and the missing-cwd check for resumed or imported sessions.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
@@ -46,14 +47,15 @@ impl SessionManager {
             cwd: target_cwd.display().to_string(),
             parent_session: Some(source.display().to_string()),
         };
-        let mut lines = vec![serde_json::to_string(&header)?];
-        lines.extend(
-            entries
-                .iter()
-                .filter(|entry| entry.get("type").and_then(Value::as_str) != Some("session"))
-                .map(|entry| serde_json::to_string(entry).unwrap_or_default()),
-        );
-        write_lines(&file, &lines, true)?;
+        write_lines(&file, true, |writer| {
+            serde_json::to_writer(&mut *writer, &header)?;
+            writer.write_all(b"\n")?;
+            for entry in entries.iter().filter(|entry| entry.get("type").and_then(Value::as_str) != Some("session")) {
+                serde_json::to_writer(&mut *writer, entry)?;
+                writer.write_all(b"\n")?;
+            }
+            Ok(())
+        })?;
         Self::open_with(&file, Some(&dir), Some(&target_cwd))
     }
 

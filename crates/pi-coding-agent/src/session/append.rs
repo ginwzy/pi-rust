@@ -29,35 +29,31 @@ impl SessionManager {
     }
 
     fn append_typed(&mut self, kind: &str, fields: Vec<(&str, Option<Value>)>) -> anyhow::Result<String> {
-        let id = self.new_entry_id();
-        self.append_typed_as(id, kind, fields)
-    }
-
-    fn append_typed_as(
-        &mut self,
-        id: String,
-        kind: &str,
-        fields: Vec<(&str, Option<Value>)>,
-    ) -> anyhow::Result<String> {
-        let mut all = vec![
-            ("type", Some(Value::String(kind.into()))),
-            ("id", Some(Value::String(id))),
-            ("parentId", Some(self.parent_value())),
-            ("timestamp", Some(Value::String(iso_timestamp()))),
-        ];
+        let mut all = self.entry_fields(self.new_entry_id(), kind);
         all.extend(fields);
         self.append_entry(Entry::build(all))
     }
 
+    fn entry_fields(&self, id: String, kind: &str) -> Vec<(&'static str, Option<Value>)> {
+        vec![
+            ("type", Some(Value::String(kind.into()))),
+            ("id", Some(Value::String(id))),
+            ("parentId", Some(self.parent_value())),
+            ("timestamp", Some(Value::String(iso_timestamp()))),
+        ]
+    }
+
     /// Append a message. Summary roles belong in compaction and branch summary entries instead.
     pub fn append_message(&mut self, message: &Message) -> anyhow::Result<String> {
-        self.append_typed("message", vec![("message", to_json(message))])
+        let fields = self.entry_fields(self.new_entry_id(), "message");
+        self.append_entry(Entry::build_message(fields, message)?)
     }
 
     /// Append a message under an id from [`reserve_entry_id`](Self::reserve_entry_id).
     pub fn append_message_as(&mut self, id: &str, message: &Message) -> anyhow::Result<String> {
         anyhow::ensure!(self.reserved.remove(id), "entry id {id} is not reserved");
-        self.append_typed_as(id.to_string(), "message", vec![("message", to_json(message))])
+        let fields = self.entry_fields(id.to_string(), "message");
+        self.append_entry(Entry::build_message(fields, message)?)
     }
 
     pub fn append_thinking_level_change(&mut self, level: ThinkingLevel) -> anyhow::Result<String> {
@@ -107,11 +103,10 @@ impl SessionManager {
     /// A compaction entry with its system checkpoint: the replayed prompt and tools at this point.
     pub fn append_compaction_with(&mut self, compaction: NewCompaction) -> anyhow::Result<String> {
         let timestamp = iso_timestamp();
-        let system =
-            pi_ai::transcript::current_system_message(&self.build_session_projection().messages).map(|mut system| {
-                system.timestamp = parse_iso(&timestamp).unwrap_or_default();
-                system
-            });
+        let system = self.current_system_message().map(|mut system| {
+            system.timestamp = parse_iso(&timestamp).unwrap_or_default();
+            system
+        });
         let id = self.new_entry_id();
         let entry = Entry::build(vec![
             ("type", Some(json!("compaction"))),

@@ -99,11 +99,18 @@ pub(crate) fn fold_top_level_tool_changes(initial: &[Tool], later: &[&SystemMess
 
 /// Replay every system message into one holding the current prompt, sections, and tools.
 pub fn current_system_message(messages: &[Message]) -> Option<SystemMessage> {
+    replay_system_messages(system_messages(messages))
+}
+
+/// Replay an ordered stream of system messages without materializing the rest of the transcript.
+pub fn replay_system_messages<'a>(systems: impl IntoIterator<Item = &'a SystemMessage>) -> Option<SystemMessage> {
     let mut content: Vec<String> = Vec::new();
     let mut sections = Map::new();
     let mut timestamp = None;
-    for system in system_messages(messages) {
+    let mut tools = Vec::new();
+    for system in systems {
         timestamp.get_or_insert(system.timestamp);
+        apply_tool_changes(&mut tools, system);
         let text = system.content.text();
         if !text.is_empty() {
             content.push(text);
@@ -119,16 +126,13 @@ pub fn current_system_message(messages: &[Message]) -> Option<SystemMessage> {
             }
         }
     }
-    let tools = current_tools(messages);
-    if timestamp.is_none() && tools.is_empty() {
-        return None;
-    }
+    let timestamp = timestamp?;
     Some(SystemMessage {
         content: UserContent::Text(content.join("\n\n")),
         sections: (!sections.is_empty()).then_some(sections),
         tools_added: (!tools.is_empty()).then_some(tools),
         tools_removed: None,
-        timestamp: timestamp.unwrap_or_default(),
+        timestamp,
     })
 }
 

@@ -14,8 +14,10 @@ pub mod tree;
 pub mod usage;
 
 use std::collections::{HashMap, HashSet};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use pi_ai::{SystemMessage, ThinkingLevel};
 use serde_json::Value;
 
 pub use self::append::NewCompaction;
@@ -75,15 +77,8 @@ pub fn session_dir(agent_dir: &Path, cwd: &Path) -> PathBuf {
 }
 
 impl SessionManager {
-    fn construct(
-        cwd: &Path,
-        session_dir: PathBuf,
-        session_file: Option<&Path>,
-        persist: bool,
-        options: NewSessionOptions,
-        preloaded: Option<Vec<FileEntry>>,
-    ) -> anyhow::Result<Self> {
-        let mut manager = Self {
+    fn empty(cwd: &Path, session_dir: PathBuf, persist: bool) -> Self {
+        Self {
             session_id: String::new(),
             session_file: None,
             session_dir,
@@ -96,7 +91,18 @@ impl SessionManager {
             labels: HashMap::new(),
             leaf: None,
             reserved: HashSet::new(),
-        };
+        }
+    }
+
+    fn construct(
+        cwd: &Path,
+        session_dir: PathBuf,
+        session_file: Option<&Path>,
+        persist: bool,
+        options: NewSessionOptions,
+        preloaded: Option<Vec<FileEntry>>,
+    ) -> anyhow::Result<Self> {
+        let mut manager = Self::empty(cwd, session_dir, persist);
         if persist && !manager.session_dir.as_os_str().is_empty() {
             // Best effort: writes create missing directories again.
             let _ = std::fs::create_dir_all(&manager.session_dir);
@@ -138,6 +144,27 @@ impl SessionManager {
     /// directory is the file's parent and the cwd comes from the header.
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         Self::open_with(path, None, None)
+    }
+
+    /// Open preloaded v3 history without reading or repairing the file. The caller must have
+    /// verified that the entries are persisted at `path` in file order with valid IDs and parents.
+    pub fn from_verified_v3(path: &Path, raw: FileEntry, entries: Vec<Entry>) -> anyhow::Result<Self> {
+        let header = header_from_raw(&raw).filter(|header| {
+            !header.id.is_empty()
+                && raw.get("version").and_then(Value::as_u64) == Some(u64::from(CURRENT_SESSION_VERSION))
+        });
+        let Some(header) = header else { anyhow::bail!("Invalid v3 session header") };
+        let cwd = if header.cwd.is_empty() { std::env::current_dir().unwrap_or_default() } else { header.cwd.into() };
+        let path = resolve_path(path);
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut manager = Self::empty(&cwd, dir, true);
+        manager.session_id = header.id;
+        manager.session_file = Some(path);
+        manager.flushed = true;
+        manager.header = raw;
+        manager.entries = entries;
+        manager.build_index();
+        Ok(manager)
     }
 
     /// Open with an explicit session directory (for `/new` and forks) and cwd override.
@@ -289,19 +316,31 @@ impl SessionManager {
         }
     }
 
-    fn file_lines(&self) -> Vec<String> {
-        let header = serde_json::to_string(&self.header).unwrap_or_default();
-        std::iter::once(header).chain(self.entries.iter().map(Entry::to_json_line)).collect()
+    /// Serialize the stored header without a trailing line feed.
+    pub fn write_header_line(&self, writer: &mut impl Write) -> io::Result<()> {
+        serde_json::to_writer(writer, &self.header).map_err(io::Error::from)
+    }
+
+    fn write_jsonl(&self, writer: &mut impl Write) -> io::Result<()> {
+        self.write_header_line(writer)?;
+        writer.write_all(b"\n")?;
+        for entry in &self.entries {
+            entry.write_json_line(writer)?;
+            writer.write_all(b"\n")?;
+        }
+        Ok(())
     }
 
     /// The whole session as JSONL, exactly as it is (or would be) stored.
     pub fn to_jsonl(&self) -> String {
-        self.file_lines().iter().map(|line| format!("{line}\n")).collect()
+        let mut bytes = Vec::new();
+        self.write_jsonl(&mut bytes).expect("serialize stored history into memory");
+        String::from_utf8(bytes).expect("JSON is UTF-8")
     }
 
     pub(crate) fn rewrite_file(&self) -> anyhow::Result<()> {
         match (&self.session_file, self.persist) {
-            (Some(path), true) => write_lines(path, &self.file_lines(), false),
+            (Some(path), true) => write_lines(path, false, |writer| self.write_jsonl(writer)),
             _ => Ok(()),
         }
     }
@@ -315,12 +354,12 @@ impl SessionManager {
     fn persist_entry(&mut self, entry_index: usize) -> anyhow::Result<()> {
         let Some(path) = self.session_file.clone().filter(|_| self.persist) else { return Ok(()) };
         if self.flushed {
-            return append_line(&path, &self.entries[entry_index].to_json_line());
+            return append_line(&path, &self.entries[entry_index]);
         }
         if !self.has_conversation() {
             return Ok(());
         }
-        write_lines(&path, &self.file_lines(), true)?;
+        write_lines(&path, true, |writer| self.write_jsonl(writer))?;
         self.flushed = true;
         Ok(())
     }
@@ -458,7 +497,19 @@ impl SessionManager {
 
     /// The finalized model context for the current leaf.
     pub fn build_session_context(&self) -> SessionContext {
-        self.build_session_projection().into_context()
+        context::build_context_of_path(self.get_branch(None))
+    }
+
+    pub fn has_context_messages(&self) -> bool {
+        context::has_context_messages(self.get_branch(None))
+    }
+
+    pub fn context_settings(&self) -> (Option<(String, String)>, Option<ThinkingLevel>) {
+        context::context_settings(&self.get_branch(None))
+    }
+
+    pub fn current_system_message(&self) -> Option<SystemMessage> {
+        context::current_system_message(self.get_branch(None))
     }
 
     /// Alias of [`Self::build_session_context`].

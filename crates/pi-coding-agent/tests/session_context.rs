@@ -46,6 +46,36 @@ fn trivial_contexts_track_settings() {
 }
 
 #[test]
+fn narrow_queries_agree_with_projection_across_edits_and_compaction() {
+    let mut session = SessionManager::in_memory(Path::new("."));
+    let check = |session: &SessionManager| {
+        let projection = session.build_session_projection().into_context();
+        assert_eq!(session.build_session_context(), projection);
+        assert_eq!(session.has_context_messages(), !projection.messages.is_empty());
+        assert_eq!(session.current_system_message(), pi_ai::transcript::current_system_message(&projection.messages));
+        assert_eq!(session.context_settings(), (projection.model, projection.thinking_level));
+    };
+    let user = session.append_message(&user("omit me")).unwrap();
+    session.append_context_edit(&user, None).unwrap();
+    assert!(!session.has_context_messages());
+    check(&session);
+
+    let system = |content: &str, sections: Value| {
+        serde_json::from_value(json!({"role": "system", "content": content, "sections": sections, "timestamp": 1}))
+            .unwrap()
+    };
+    let checkpoint = session.append_message(&system("base", json!({"old": "value"}))).unwrap();
+    session.append_compaction("summary", &checkpoint, 200).unwrap();
+    session.append_message(&system("patch", json!({"old": null, "new": "value"}))).unwrap();
+    session.append_thinking_level_change(ThinkingLevel::High).unwrap();
+    session.append_model_change("provider", "model").unwrap();
+    check(&session);
+    let current = session.current_system_message().unwrap();
+    assert_eq!(current.content.text(), "base\n\npatch");
+    assert_eq!(current.sections.unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["new"]);
+}
+
+#[test]
 fn compaction_replaces_older_entries_with_its_summary() {
     let session = with_entries(vec![
         message_entry("1", None, &user("first")),

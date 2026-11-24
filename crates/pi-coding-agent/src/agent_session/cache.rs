@@ -124,8 +124,11 @@ impl AgentSession {
                     && len.checked_sub(1).and_then(|index| state.messages.get(index)).map(message_stamp) == last
             })
         });
-        let request = CacheWarmRequest { model: model.clone(), context: context.clone(), options: options.clone() };
-        self.cache_warmer.start(request, is_current);
+        self.cache_warmer.start_lazy(model, options, is_current, || CacheWarmRequest {
+            model: model.clone(),
+            context: context.clone(),
+            options: options.clone(),
+        });
     }
 
     /// The cache miss a completed response paid for, with its notice, when `showCacheMissNotices`
