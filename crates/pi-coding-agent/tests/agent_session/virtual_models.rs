@@ -14,6 +14,7 @@ use pi_coding_agent::virtual_models::{
 use serde_json::{Value, json};
 
 use crate::harness::{Harness, Options, harness, open_session};
+use crate::sharing::same_message;
 
 type Route = Arc<dyn Fn(&ModelRouteRequest, &dyn ModelLookup) -> anyhow::Result<ModelRoute> + Send + Sync>;
 
@@ -135,6 +136,54 @@ fn read_call() -> FauxResponse {
 
 fn retry_settings() -> Value {
     json!({"retry": {"enabled": true, "maxRetries": 3, "baseDelayMs": 1}})
+}
+
+#[tokio::test]
+async fn routing_to_a_smaller_window_compacts_before_dispatch_and_shares_kept_history() {
+    let wide_text = "earlier history ".repeat(950);
+    let kept_text = "recent history ".repeat(850);
+    let routed = routed(
+        Arc::new(default_route),
+        Options {
+            responses: vec![
+                FauxResponse::text("earlier reply"),
+                FauxResponse::text("recent reply ".repeat(1800)),
+                FauxResponse::text("## Goal\nSummarized earlier turns"),
+                FauxResponse::text("narrow answer"),
+            ],
+            settings: json!({"compaction":{"reserveTokens":2000,"keepRecentTokens":7000}}),
+            context_window: 4800,
+            tiny: json!({"contextWindow":128000}),
+            ..Options::default()
+        },
+    )
+    .await;
+    routed.h.session.prompt(&wide_text, Vec::new()).await.unwrap();
+    routed.h.session.prompt(&kept_text, Vec::new()).await.unwrap();
+    assert!(routed.h.events_of("compaction_start").is_empty());
+    let before = routed.h.session.session_manager().build_session_context().messages;
+    routed.h.session.set_thinking_level(ThinkingLevel::Low, false);
+    routed.h.session.prompt("narrow request", Vec::new()).await.unwrap();
+    assert_eq!(routed.h.events_of("compaction_start"), [json!({"type":"compaction_start","reason":"threshold"})]);
+    assert_eq!(routed.reasons(), ["user", "user", "user", "direct"]);
+    assert_eq!(routed.h.session.last_assistant_text().as_deref(), Some("narrow answer"));
+    let requests = routed.h.requests();
+    assert_eq!(requests.len(), 4);
+    let dispatched = &requests.last().unwrap().messages;
+    let projected = routed.h.session.session_manager().build_session_context().messages;
+    let live = routed.h.session.agent().state().messages;
+    let kept = before
+        .iter()
+        .filter(|previous| {
+            !matches!(previous, Message::System(_)) && projected.iter().any(|message| message == *previous)
+        })
+        .collect::<Vec<_>>();
+    assert!(!kept.is_empty() && kept.len() < 4, "compaction must keep some but not all of the old turns");
+    for previous in kept {
+        for messages in [&projected, &live, dispatched] {
+            assert!(messages.iter().any(|message| same_message(previous, message)), "copied kept {}", previous.role());
+        }
+    }
 }
 
 #[tokio::test]

@@ -20,6 +20,7 @@ mod prompt;
 mod retry;
 mod run_limits;
 mod runtime;
+mod sharing;
 mod tool_loadout;
 mod tool_options;
 mod tool_registry;
