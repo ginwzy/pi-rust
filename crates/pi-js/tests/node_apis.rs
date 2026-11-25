@@ -411,3 +411,80 @@ return {
     assert_eq!(actual["tsMap"], true);
     assert_eq!(actual.get("missing"), None);
 }
+
+#[tokio::test]
+async fn intl_display_names_validates_options_and_resolves_codes() {
+    let actual = run(r#"
+const err = (fn) => { try { fn(); return "ok"; } catch (e) { return e.name; } };
+const langNone = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
+const langCode = new Intl.DisplayNames(["en"], { type: "language", fallback: "code" });
+const region = new Intl.DisplayNames(["en"], { type: "region", fallback: "none" });
+const script = new Intl.DisplayNames(["en"], { type: "script", fallback: "code" });
+const currency = new Intl.DisplayNames(["en"], { type: "currency", fallback: "none" });
+const calendar = new Intl.DisplayNames(["en"], { type: "calendar", fallback: "none" });
+const field = new Intl.DisplayNames(["en"], { type: "dateTimeField" });
+return {
+  languages: [langNone.of("en"), langNone.of("zh"), langNone.of("ZH"), langNone.of("en-US"), langNone.of("zz") ?? null, langCode.of("zz")],
+  regions: [region.of("US"), region.of("zz"), region.of("QQ") ?? null],
+  scripts: [script.of("hans"), script.of("Zzzz")],
+  currencies: [currency.of("usd"), currency.of("XXX") ?? null],
+  calendars: [calendar.of("iso8601"), calendar.of("toString") ?? null],
+  field: field.of("weekday"),
+  resolvedLang: langNone.resolvedOptions(),
+  resolvedRegion: region.resolvedOptions(),
+  supported: Intl.DisplayNames.supportedLocalesOf(["en"]),
+  errors: [
+    err(() => new Intl.DisplayNames(["en"])),
+    err(() => new Intl.DisplayNames(["en"], {})),
+    err(() => new Intl.DisplayNames(["en"], { type: "bogus" })),
+    err(() => new Intl.DisplayNames(["en"], { type: "language", style: "huge" })),
+    err(() => new Intl.DisplayNames(["en"], { type: "language", fallback: "never" })),
+    err(() => langNone.of("")),
+    err(() => langNone.of("bad!code")),
+    err(() => region.of("USA")),
+    err(() => field.of("unknown")),
+  ],
+};
+"#)
+    .await;
+    assert_eq!(actual["languages"], json!(["English", "Chinese", "Chinese", "English (United States)", null, "zz"]));
+    assert_eq!(actual["regions"], json!(["United States", "Unknown Region", null]));
+    assert_eq!(actual["scripts"], json!(["Simplified", "Zzzz"]));
+    assert_eq!(actual["currencies"], json!(["US Dollar", null]));
+    assert_eq!(actual["calendars"], json!(["ISO-8601 Calendar", null]));
+    assert_eq!(actual["field"], json!("day of the week"));
+    assert_eq!(
+        actual["resolvedLang"],
+        json!({
+            "locale": "en-US",
+            "style": "long",
+            "type": "language",
+            "fallback": "none",
+            "languageDisplay": "dialect",
+        })
+    );
+    assert_eq!(
+        actual["resolvedRegion"],
+        json!({
+            "locale": "en-US",
+            "style": "long",
+            "type": "region",
+            "fallback": "none",
+        })
+    );
+    assert_eq!(actual["supported"], json!(["en-US"]));
+    assert_eq!(
+        actual["errors"],
+        json!([
+            "TypeError",
+            "TypeError",
+            "RangeError",
+            "RangeError",
+            "RangeError",
+            "RangeError",
+            "RangeError",
+            "RangeError",
+            "RangeError",
+        ])
+    );
+}

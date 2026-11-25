@@ -111,6 +111,9 @@ pub(crate) fn start(
     let Launch { mut command, watch } = options.launcher.launch(executable.as_os_str());
     command
         .arg("--disable-warning=ExperimentalWarning")
+        // Keep V8's semi-space and heap growth compact across per-session Node hosts without
+        // imposing a hard old-generation cap (`options.memory_limit` still overrides per worker).
+        .arg("--optimize-for-size")
         .arg(dir.join("main.cjs"))
         .current_dir(&shared.config.cwd)
         .stdin(Stdio::null())

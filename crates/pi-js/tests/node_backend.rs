@@ -213,3 +213,28 @@ async fn interrupt_ends_a_busy_worker() {
     let (busy, ()) = tokio::join!(busy, interrupt);
     assert!(busy.unwrap_err().message.contains("interrupted"));
 }
+
+#[tokio::test]
+async fn node_backend_optimizes_heap_for_size_and_respects_memory_limit() {
+    let (_dir, root) = tempdir();
+    let capture = Arc::new(Capture::default());
+    let mut opts = options(&root, &capture);
+    opts.memory_limit = Some(128 * 1024 * 1024);
+    let Some(runtime) = node_runtime_with(opts) else { return };
+    let actual = runtime
+        .eval(
+            r#"(async () => {
+  const v8 = await import("node:v8");
+  return {
+    optimizeForSize: process.execArgv.includes("--optimize-for-size"),
+    heapLimitMb: Math.round(v8.getHeapStatistics().heap_size_limit / (1024 * 1024)),
+  };
+})()"#,
+        )
+        .await
+        .unwrap()
+        .into_json();
+    assert_eq!(actual["optimizeForSize"], json!(true));
+    let limit_mb = actual["heapLimitMb"].as_u64().unwrap();
+    assert!((120..=256).contains(&limit_mb), "expected worker heap limit near 128 MiB, got {limit_mb} MiB");
+}
