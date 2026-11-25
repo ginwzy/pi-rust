@@ -45,11 +45,8 @@ async fn virtual_modules_and_registered_sources() {
     let Some((runtime, _capture)) = node_runtime(&root) else { return };
     let vendor = root.join("vendor-not-on-disk");
     runtime.register_source_files([
-        (
-            vendor.join("lib/index.ts"),
-            "export { greet } from \"./greet\";\nexport const kind: string = 'vendor';\n".into(),
-        ),
-        (vendor.join("lib/greet.ts"), "export const greet = (name: string) => `hi ${name}`;\n".into()),
+        (vendor.join("lib/index.ts"), "export { greet } from \"./greet\";\nexport const kind: string = 'vendor';\n"),
+        (vendor.join("lib/greet.ts"), "export const greet = (name: string) => `hi ${name}`;\n"),
     ]);
     runtime.register_virtual_module(
         "@earendil-works/pi-coding-agent",

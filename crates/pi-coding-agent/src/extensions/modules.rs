@@ -3,6 +3,7 @@
 //! over the session. Every alias of upstream's table resolves to one shared instance.
 
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use pi_js::{VirtualModule, VirtualModules};
 
@@ -28,6 +29,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("native_register.js", include_str!("js/native_register.js")),
     ("native_rpc.js", include_str!("js/native_rpc.js")),
     ("native_ui.js", include_str!("js/native_ui.js")),
+    ("providers.js", include_str!("js/providers.js")),
     ("runner.js", include_str!("js/runner.js")),
     ("sdk_session.js", include_str!("js/sdk_session.js")),
     ("sdk_storage.js", include_str!("js/sdk_storage.js")),
@@ -55,12 +57,16 @@ pub(crate) fn host_specifier() -> String {
 }
 
 /// Embedded upstream files and the host modules, keyed by absolute path.
-pub(crate) fn source_files() -> Vec<(PathBuf, String)> {
-    let root = vendor_root();
-    let mut files = vendor::source_files(&root);
-    files.extend(HOST_FILES.iter().map(|(name, source)| (root.join("host").join(name), source.to_string())));
-    files.push((root.join(THEME_SHIM), format!("export * from \"{}\";\n", path("host/theme.js"))));
-    files
+pub(crate) fn source_files() -> &'static [(PathBuf, Arc<str>)] {
+    static FILES: OnceLock<Vec<(PathBuf, Arc<str>)>> = OnceLock::new();
+    FILES.get_or_init(|| {
+        let root = vendor_root();
+        let mut files = vendor::source_files(&root);
+        files.extend(HOST_FILES.iter().map(|(name, source)| (root.join("host").join(name), Arc::from(*source))));
+        let theme = vendor::specifier(&root, "host/theme.js");
+        files.push((root.join(THEME_SHIM), format!("export * from \"{theme}\";\n").into()));
+        files
+    })
 }
 
 /// Modules for the canonical names; [`pi_js::VIRTUAL_MODULE_ALIASES`] maps the others to these.
@@ -97,6 +103,17 @@ mod tests {
         }
         for (alias, _) in pi_js::VIRTUAL_MODULE_ALIASES {
             assert!(modules.canonical_name(alias).is_some(), "{alias}");
+        }
+    }
+
+    #[test]
+    fn bundled_sources_share_storage_across_registrations() {
+        let first = source_files().to_vec();
+        let second = source_files();
+        assert!(second.len() > 700);
+        for ((path, source), (same_path, same_source)) in first.iter().zip(second) {
+            assert_eq!(path, same_path);
+            assert!(Arc::ptr_eq(source, same_source));
         }
     }
 }

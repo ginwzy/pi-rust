@@ -21,6 +21,10 @@ pub struct PositionMap {
 }
 
 impl PositionMap {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.tokens.capacity() * size_of::<[u32; 4]>()
+    }
+
     pub(crate) fn from_source_map(map: &oxc_sourcemap::SourceMap<'_>) -> Self {
         let mut tokens: Vec<[u32; 4]> = map
             .get_tokens()

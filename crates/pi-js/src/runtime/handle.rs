@@ -273,7 +273,10 @@ impl JsHandle {
 
     /// Make module files load from memory: each `(path, source)` pair acts as a file at that
     /// absolute path, so relative imports between registered files resolve.
-    pub fn register_source_files(&self, files: impl IntoIterator<Item = (std::path::PathBuf, String)>) {
+    pub fn register_source_files(
+        &self,
+        files: impl IntoIterator<Item = (std::path::PathBuf, impl Into<std::sync::Arc<str>>)>,
+    ) {
         let mut registered = self.shared.source_files.write().unwrap_or_else(|poison| poison.into_inner());
         for (path, source) in files {
             let key = crate::resolve::normalize(&path).display().to_string();

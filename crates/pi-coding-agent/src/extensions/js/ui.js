@@ -2,7 +2,6 @@
 // of the session `target`; component factories stay here and Rust creates their components by id
 // when the TUI shows them (`createComponent`).
 import { AsyncLocalStorage } from "node:async_hooks";
-import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { call, callAsync, invokeCallback, optional, registerCallback, releaseCallback, signalId } from "./bridge.js";
 import { currentTheme, getEditorTheme, themeByName } from "./theme.js";
 
@@ -45,12 +44,14 @@ function tuiHandle(target) {
 let keybindings;
 
 /** The app keybindings (`keybindings.json` over the defaults) for `matches(data, id)`. */
-export function appKeybindings() {
-	if (!keybindings) {
+function appKeybindings() {
+	return keybindings ??= import("../pi-tui/src/keybindings.ts").then(({ KeybindingsManager, TUI_KEYBINDINGS }) => {
 		const { definitions, user } = call("ui.keybindings");
-		keybindings = new KeybindingsManager({ ...TUI_KEYBINDINGS, ...definitions }, user);
-	}
-	return keybindings;
+		return new KeybindingsManager({ ...TUI_KEYBINDINGS, ...definitions }, user);
+	}).catch((error) => {
+		keybindings = undefined;
+		throw error;
+	});
 }
 
 /** Called by Rust: build the component of factory `id`. `doneKey` resolves a `custom()` call. */
@@ -62,12 +63,12 @@ export async function createComponent(id, target, extra) {
 	switch (entry.kind) {
 		case "custom": {
 			const done = (result) => call("ui.customDone", id, result === undefined ? null : result);
-			return await entry.factory(tui, theme, appKeybindings(), done);
+			return await entry.factory(tui, theme, await appKeybindings(), done);
 		}
 		case "footer":
 			return await entry.factory(tui, theme, footerData(target));
 		case "editor":
-			return attachEditor(await entry.factory(tui, getEditorTheme(), appKeybindings()), target);
+			return attachEditor(await entry.factory(tui, getEditorTheme(), await appKeybindings()), target);
 		case "autocomplete":
 			return entry.factory(extra);
 		default:

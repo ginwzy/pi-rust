@@ -2,6 +2,7 @@
 // Main thread of the pi Node backend. It owns the loopback connection to Rust (one JSON message
 // per line) and relays messages to the Worker that runs extension code. It does not block.
 const net = require("node:net");
+const Module = require("node:module");
 const path = require("node:path");
 const { Worker, MessageChannel } = require("node:worker_threads");
 const readFrames = require("./frames.cjs");
@@ -45,7 +46,7 @@ function onRust(frame) {
       break;
     case "reply":
       if (typeof frame.id === "string" && frame.id.startsWith("h")) {
-        hooksPort.postMessage(frame);
+        hooksPort?.postMessage(frame);
       } else {
         replyPort.postMessage(frame);
         wakeWorker();
@@ -68,10 +69,10 @@ function start(config) {
   if (major < MIN_MAJOR) return fail(`Node ${process.version} is older than Node ${MIN_MAJOR}`);
   ctl = new Int32Array(new SharedArrayBuffer(4));
   const replies = new MessageChannel();
-  const hooks = new MessageChannel();
+  const hooks = typeof Module.registerHooks === "function" ? undefined : new MessageChannel();
   replyPort = replies.port1;
-  hooksPort = hooks.port1;
-  hooksPort.on("message", (frame) => sendJson(frame));
+  hooksPort = hooks?.port1;
+  hooksPort?.on("message", (frame) => sendJson(frame));
   const resourceLimits = {};
   if (config.memoryMb) resourceLimits.maxOldGenerationSizeMb = config.memoryMb;
   if (config.stackMb) resourceLimits.stackSizeMb = config.stackMb;
@@ -80,8 +81,8 @@ function start(config) {
     stdout: true,
     stderr: true,
     resourceLimits,
-    workerData: { ctl, replyPort: replies.port2, hooksPort: hooks.port2, config },
-    transferList: [replies.port2, hooks.port2],
+    workerData: { ctl, replyPort: replies.port2, hooksPort: hooks?.port2, config },
+    transferList: hooks ? [replies.port2, hooks.port2] : [replies.port2],
   });
   worker.stdout.on("data", (chunk) => sendJson({ t: "out", s: 1, b: chunk.toString("base64") }));
   worker.stderr.on("data", (chunk) => sendJson({ t: "out", s: 2, b: chunk.toString("base64") }));

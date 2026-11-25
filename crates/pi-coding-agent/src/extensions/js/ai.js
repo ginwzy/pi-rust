@@ -1,6 +1,7 @@
 // `@earendil-works/pi-ai` (the compat entry point extensions load): upstream utilities run as
 // embedded upstream code; streaming, the catalog, and API providers go to Rust.
 import { call, optional } from "./bridge.js";
+import { apiProviders } from "./providers.js";
 import { failedMessage, rustStream } from "./stream.js";
 import { createAssistantMessageEventStream } from "../pi-ai/src/utils/event-stream.ts";
 
@@ -41,8 +42,7 @@ export { uuidv7 } from "../pi-ai/src/utils/uuid.ts";
 export * from "../pi-ai/src/utils/validation.ts";
 export * from "../pi-ai/src/utils/version.ts";
 
-/** API providers registered from JavaScript (`registerApiProvider`), by API id. */
-export const apiProviders = new Map();
+export { apiProviders };
 
 export function registerApiProvider(provider, sourceId) {
 	apiProviders.set(provider.api, { provider, sourceId });

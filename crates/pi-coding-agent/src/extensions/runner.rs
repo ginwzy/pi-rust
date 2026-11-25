@@ -214,7 +214,7 @@ impl ExtensionRunner {
         // Host work runs on the caller's runtime, so operations survive the runner they started from.
         options.tokio = tokio::runtime::Handle::try_current().ok();
         let runtime = JsRuntime::new(options).map_err(js_error)?;
-        runtime.register_source_files(modules::source_files());
+        runtime.register_source_files(modules::source_files().iter().cloned());
         let js = (*runtime).clone();
         let runner = Arc::new_cyclic(|weak: &Weak<ExtensionRunner>| {
             let sync_weak = weak.clone();

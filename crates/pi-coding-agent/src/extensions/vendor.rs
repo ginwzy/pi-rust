@@ -5,15 +5,15 @@
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use flate2::read::GzDecoder;
 
 static ARCHIVE: &[u8] = include_bytes!("vendor.json.gz");
 
 /// The bundled files by archive path, decompressed once.
-fn files() -> &'static BTreeMap<String, String> {
-    static FILES: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+fn files() -> &'static BTreeMap<String, Arc<str>> {
+    static FILES: OnceLock<BTreeMap<String, Arc<str>>> = OnceLock::new();
     FILES.get_or_init(|| {
         let mut json = Vec::new();
         let decoded = GzDecoder::new(ARCHIVE).read_to_end(&mut json);
@@ -23,11 +23,12 @@ fn files() -> &'static BTreeMap<String, String> {
 
 /// The absolute directory the bundled files appear under. Nothing is written there.
 pub fn vendor_root() -> PathBuf {
-    std::env::temp_dir().join("pi-extension-host")
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| std::env::temp_dir().join("pi-extension-host")).clone()
 }
 
 /// Every bundled file as an absolute path under `root` and its source.
-pub fn source_files(root: &Path) -> Vec<(PathBuf, String)> {
+pub fn source_files(root: &Path) -> Vec<(PathBuf, Arc<str>)> {
     files().iter().map(|(key, source)| (root.join(key), source.clone())).collect()
 }
 

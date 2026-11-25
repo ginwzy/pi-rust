@@ -5,7 +5,7 @@ import * as bridge from "./bridge.js";
 import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor } from "./bridge.js";
 import { nativeFactory } from "./native.js";
 import { Runner } from "./runner.js";
-import { apiProviders } from "./ai.js";
+import { apiProviders } from "./providers.js";
 import { sessionStream } from "./stream.js";
 import { currentTheme } from "./theme.js";
 import * as ui from "./ui.js";

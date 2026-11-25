@@ -98,9 +98,12 @@ fn cache_reuses_entries_by_content() {
     let a = cache.get_or_transpile(Path::new("/a.ts"), "export const a: number = 1;").unwrap();
     let b = cache.get_or_transpile(Path::new("/b.ts"), "export const a: number = 1;").unwrap();
     assert!(Arc::ptr_eq(&a, &b));
-    assert_eq!(cache.len(), 1);
     let fresh = TranspileCache::new(TranspileOptions::default(), Some(dir.path().to_path_buf()));
     let c = fresh.get_or_transpile(Path::new("/c.ts"), "export const a: number = 1;").unwrap();
-    assert_eq!(*a, *c);
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    assert!(Arc::ptr_eq(&a, &c));
+    let changed = fresh.get_or_transpile(Path::new("/c.ts"), "export const a: number = 2;").unwrap();
+    assert!(!Arc::ptr_eq(&a, &changed));
+    let untyped = fresh.get_or_transpile(Path::new("/c.js"), "export const a: number = 1;");
+    assert!(untyped.is_err());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
 }
