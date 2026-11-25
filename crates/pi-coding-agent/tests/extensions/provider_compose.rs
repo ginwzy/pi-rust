@@ -80,7 +80,7 @@ async fn extension_providers_refresh_modify_and_run_their_operations() {
     let refreshed = runtime.get_model("compose-demo", "refreshed").expect("refreshed model");
     assert_eq!(refreshed.name, "Refreshed for token (true/oauth)");
 
-    let all = runtime.registry().all_models().to_vec();
+    let all = runtime.registry().all_models().cloned().collect::<Vec<_>>();
     let find = |id: &str| all.iter().find(|model| model.provider == "compose-demo" && model.id == id).unwrap().clone();
     let context = ImagesContext { input: vec![pi_ai::ContentBlock::text("a cat")] };
     let mut options = ImagesOptions::default();

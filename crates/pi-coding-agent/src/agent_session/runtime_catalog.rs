@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_ai::auth::{ApiKeyCredential, Credential, ResolvedAuth};
-use pi_ai::models::{ModelRegistry, builtin_models};
+use pi_ai::models::{ModelRegistry, ModelsFileError, builtin_model_arcs};
 use tokio_util::sync::CancellationToken;
 
 use super::lock;
@@ -113,11 +113,16 @@ impl ModelRuntime {
     /// Compose the catalog from the bundled models, the pi.dev overlay, and Radius gateways, and
     /// restore their last lists from the store without network access.
     pub async fn enable_dynamic_catalogs(&self, setup: CatalogSetup) {
+        self.install_catalogs(setup, self.llama_provider());
+        self.refresh_catalogs(false, None, false).await;
+    }
+
+    pub(super) fn install_catalogs(&self, setup: CatalogSetup, llama: Option<Arc<LlamaProvider>>) {
         let mut config = setup.config.clone();
         if config.models_json.is_none() {
             config.models_json = std::fs::read_to_string(self.models_path()).ok();
         }
-        let mut catalogs = builtin_catalogs(builtin_models(), &config);
+        let mut catalogs = builtin_catalogs(builtin_model_arcs(), &config);
         catalogs.retain(|catalog| catalog.provider_id() != LLAMA_PROVIDER_ID);
         let credentials = Arc::new(ResolverCredentials::new(self.resolver().clone()));
         let refresher = Arc::new(CatalogRefresher::new(setup.store.clone(), credentials));
@@ -126,8 +131,8 @@ impl ModelRuntime {
             state.setup = Some(setup);
             state.catalogs = catalogs;
             state.refresher = Some(refresher);
+            state.llama = llama;
         }
-        self.refresh_catalogs(false, None, false).await;
     }
 
     /// Whether dynamic catalogs are on.
@@ -183,23 +188,27 @@ impl ModelRuntime {
 
     /// Bundled models, catalogs, and `models.json`, before extension providers.
     pub(super) fn base_registry(&self) -> ModelRegistry {
+        self.load_registry().0
+    }
+
+    fn load_registry(&self) -> (ModelRegistry, Option<ModelsFileError>) {
         let catalogs = read(&self.catalogs).all();
-        let (registry, _) = if catalogs.is_empty() {
+        if catalogs.is_empty() {
             ModelRegistry::load_lenient(self.models_path())
         } else {
-            build_registry(builtin_models(), &catalogs, Some(self.models_path()))
-        };
-        registry
+            build_registry(builtin_model_arcs(), &catalogs, Some(self.models_path()))
+        }
     }
 
     /// Recompose the registry: bundled models, catalogs, `models.json`, extension providers,
     /// `modelOverrides`, then virtual models. Readers see the old or the new registry.
-    pub(super) fn rebuild_registry(&self) {
-        let mut registry = self.base_registry();
+    pub(super) fn rebuild_registry(&self) -> Option<ModelsFileError> {
+        let (mut registry, error) = self.load_registry();
         self.apply_extension_providers(&mut registry);
         self.resolver().set_provider_configs(registry.auth_configs());
         self.add_virtual_models(&mut registry);
         *self.registry_mut() = registry;
+        error
     }
 
     /// Refresh the catalogs (or `providers`), then recompose the registry and recheck auth.
@@ -215,6 +224,13 @@ impl ModelRuntime {
     }
 
     pub async fn refresh_catalogs_with(&self, options: RefreshOptions) -> RefreshResult {
+        self.refresh_catalogs_result(options).await.0
+    }
+
+    pub(super) async fn refresh_catalogs_result(
+        &self,
+        options: RefreshOptions,
+    ) -> (RefreshResult, Option<ModelsFileError>) {
         let (refresher, catalogs) = {
             let state = read(&self.catalogs);
             (state.refresher.clone(), state.all())
@@ -226,9 +242,9 @@ impl ModelRuntime {
         if !result.aborted {
             self.refresh_extension_providers(&options, &mut result).await;
         }
-        self.rebuild_registry();
+        let error = self.rebuild_registry();
         self.refresh_configured_providers().await;
-        result
+        (result, error)
     }
 
     /// Start an offline refresh without waiting for it, as upstream does when a provider or

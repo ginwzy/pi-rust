@@ -3,6 +3,7 @@
 //! `compat` for built-in models, and `modelOverrides`.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -152,8 +153,8 @@ fn override_applies(model: &Model, key: &str) -> bool {
     }
 }
 
-pub(crate) fn apply_override(model: &Model, patch: &Map<String, Value>) -> Result<Model, String> {
-    let Value::Object(mut target) = serde_json::to_value(model).map_err(|error| error.to_string())? else {
+pub(crate) fn apply_override(model: &mut Arc<Model>, patch: &Map<String, Value>) -> Result<(), String> {
+    let Value::Object(mut target) = serde_json::to_value(model.as_ref()).map_err(|error| error.to_string())? else {
         return Err("model did not serialize to an object".into());
     };
     for (key, value) in patch.iter().filter(|(key, _)| override_applies(model, key)) {
@@ -195,7 +196,11 @@ pub(crate) fn apply_override(model: &Model, patch: &Map<String, Value>) -> Resul
             _ => {}
         }
     }
-    serde_json::from_value(Value::Object(target)).map_err(|error| error.to_string())
+    let updated: Model = serde_json::from_value(Value::Object(target)).map_err(|error| error.to_string())?;
+    if updated != **model {
+        *model = Arc::new(updated);
+    }
+    Ok(())
 }
 
 fn positive(value: Option<f64>, field: &str, provider: &str, id: &str) -> Result<Option<u64>, String> {
@@ -255,8 +260,8 @@ fn model_from_definition(
     })
 }
 
-fn find_defaults<'a>(models: &'a [Model], id: &str, api: Option<&str>) -> Option<&'a Model> {
-    let chat = || models.iter().filter(|model| is_chat(model));
+fn find_defaults<'a>(models: &'a [Arc<Model>], id: &str, api: Option<&str>) -> Option<&'a Model> {
+    let chat = || models.iter().map(Arc::as_ref).filter(|model| is_chat(model));
     chat()
         .find(|model| model.id == id)
         .or_else(|| api.and_then(|api| chat().find(|model| model.api == api)))
@@ -265,7 +270,11 @@ fn find_defaults<'a>(models: &'a [Model], id: &str, api: Option<&str>) -> Option
 }
 
 /// Apply one provider's configuration to its models (built-in plus custom).
-pub(crate) fn apply_provider(provider: &str, base: Vec<Model>, config: &ProviderConfig) -> Result<Vec<Model>, String> {
+pub(crate) fn apply_provider(
+    provider: &str,
+    mut models: Vec<Arc<Model>>,
+    config: &ProviderConfig,
+) -> Result<Vec<Arc<Model>>, String> {
     if config.oauth.is_some() && config.base_url.is_none() {
         return Err(format!("Provider {provider}: \"baseUrl\" is required when \"oauth\" is set."));
     }
@@ -284,38 +293,41 @@ pub(crate) fn apply_provider(provider: &str, base: Vec<Model>, config: &Provider
             "Provider {provider}: must specify \"baseUrl\", \"headers\", \"compat\", \"modelOverrides\", or \"models\"."
         ));
     }
-    let mut models: Vec<Model> = base
-        .into_iter()
-        .map(|mut model| {
-            if config.oauth.as_deref() != Some("radius")
-                && let Some(base_url) = &config.base_url
-            {
-                model.base_url = base_url.clone();
-            }
-            if is_chat(&model) {
-                model.compat = merge_compat(model.compat.as_ref(), config.compat.as_ref());
-            } else if let (Some("classifier"), Some(patch)) = (model.model_type.as_deref(), &config.compat) {
-                // Classifier APIs read their own compat fields, such as how a System One service takes images.
-                let mut compat = model.compat.as_ref().and_then(Value::as_object).cloned().unwrap_or_default();
-                compat.extend(patch.iter().map(|(key, value)| (key.clone(), value.clone())));
-                model.compat = Some(Value::Object(compat));
-            }
-            model
-        })
-        .collect();
+    for model in &mut models {
+        if config.oauth.as_deref() != Some("radius")
+            && let Some(base_url) = &config.base_url
+            && model.base_url != *base_url
+        {
+            Arc::make_mut(model).base_url.clone_from(base_url);
+        }
+        let Some(patch) = &config.compat else { continue };
+        let compat = if is_chat(model) {
+            merge_compat(model.compat.as_ref(), Some(patch))
+        } else if model.model_type.as_deref() == Some("classifier") {
+            // Classifier APIs read their own compat fields, such as how a System One service takes images.
+            let mut compat = model.compat.as_ref().and_then(Value::as_object).cloned().unwrap_or_default();
+            compat.extend(patch.iter().map(|(key, value)| (key.clone(), value.clone())));
+            Some(Value::Object(compat))
+        } else {
+            continue;
+        };
+        if model.compat != compat {
+            Arc::make_mut(model).compat = compat;
+        }
+    }
     for definition in config.models.iter().flatten() {
         let defaults = find_defaults(&models, &definition.id, definition.api.as_deref().or(config.api.as_deref()));
         let model = model_from_definition(provider, definition, config, defaults)?;
         let kind = model.model_type.clone();
         match models.iter_mut().find(|existing| existing.id == model.id && existing.model_type == kind) {
-            Some(existing) => *existing = model,
-            None => models.push(model),
+            Some(existing) if **existing != model => *existing = Arc::new(model),
+            Some(_) => {}
+            None => models.push(Arc::new(model)),
         }
     }
     for (id, patch) in config.model_overrides.iter().flatten() {
         for model in models.iter_mut().filter(|model| &model.id == id) {
-            *model =
-                apply_override(model, patch).map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
+            apply_override(model, patch).map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
         }
     }
     Ok(models)

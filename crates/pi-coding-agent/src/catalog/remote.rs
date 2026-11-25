@@ -3,7 +3,7 @@
 //! over the bundled list (upstream `core/remote-catalog-provider.ts`).
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -21,16 +21,19 @@ const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(4_000);
 
 /// Merge by model type and id: `dynamic` replaces matching baseline entries in place and
 /// appends new ones.
-pub fn merge_models(baseline: Vec<Model>, dynamic: &[Model]) -> Vec<Model> {
-    let mut merged: Vec<Model> = Vec::with_capacity(baseline.len() + dynamic.len());
-    let mut index: HashMap<(String, String), usize> = HashMap::new();
-    for model in baseline.into_iter().chain(dynamic.iter().cloned()) {
-        let key = (model_type(&model).to_string(), model.id.clone());
+pub fn merge_models(baseline: Vec<Arc<Model>>, dynamic: &[Arc<Model>]) -> Vec<Arc<Model>> {
+    if dynamic.is_empty() {
+        return baseline;
+    }
+    let mut merged = Vec::with_capacity(baseline.len() + dynamic.len());
+    let mut index = HashMap::new();
+    for model in baseline.iter().chain(dynamic) {
+        let key = (model_type(model), model.id.as_str());
         match index.get(&key) {
-            Some(&position) => merged[position] = model,
+            Some(&position) => merged[position] = model.clone(),
             None => {
                 index.insert(key, merged.len());
-                merged.push(model);
+                merged.push(model.clone());
             }
         }
     }
@@ -160,7 +163,7 @@ pub struct RemoteCatalogOverlay {
     base_url: String,
     local_generated_at: Option<i64>,
     client: reqwest::Client,
-    dynamic: RwLock<Vec<Model>>,
+    dynamic: RwLock<Vec<Arc<Model>>>,
 }
 
 impl RemoteCatalogOverlay {
@@ -181,11 +184,11 @@ impl RemoteCatalogOverlay {
 
     /// The overlay models currently in effect.
     pub fn overlay_models(&self) -> Vec<Model> {
-        self.dynamic.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+        self.dynamic.read().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().map(|m| (**m).clone()).collect()
     }
 
     fn set_dynamic(&self, models: Vec<Model>) {
-        *self.dynamic.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = models;
+        *self.dynamic.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = pi_ai::models::into_model_arcs(models);
     }
 }
 
@@ -195,8 +198,8 @@ impl DynamicCatalog for RemoteCatalogOverlay {
         &self.provider_id
     }
 
-    fn compose(&self, builtin: Vec<Model>) -> Vec<Model> {
-        merge_models(builtin, &self.overlay_models())
+    fn compose(&self, builtin: Vec<Arc<Model>>) -> Vec<Arc<Model>> {
+        merge_models(builtin, &self.dynamic.read().unwrap_or_else(|poisoned| poisoned.into_inner()))
     }
 
     async fn refresh(&self, context: &RefreshContext<'_>) -> anyhow::Result<()> {

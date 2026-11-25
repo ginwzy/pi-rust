@@ -88,7 +88,6 @@ impl ModelRuntime {
         let configs = registry.auth_configs();
         let physical: HashSet<&str> = registry
             .all_models()
-            .iter()
             .filter(|model| !is_virtual_model(model))
             .map(|model| model.provider.as_str())
             .collect();

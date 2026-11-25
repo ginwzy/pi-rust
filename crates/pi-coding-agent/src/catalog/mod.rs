@@ -33,7 +33,7 @@ pub use update::{
 
 /// Bundled models with each catalog applied to its provider. Providers keep their bundled
 /// order; catalogs of providers without bundled models follow at the end.
-pub fn compose_catalog(builtin: &[Model], catalogs: &[Arc<dyn DynamicCatalog>]) -> Vec<Model> {
+pub fn compose_catalog(builtin: &[Arc<Model>], catalogs: &[Arc<dyn DynamicCatalog>]) -> Vec<Arc<Model>> {
     let mut composed = Vec::with_capacity(builtin.len());
     let mut done: HashSet<&str> = HashSet::new();
     for model in builtin {
@@ -43,7 +43,7 @@ pub fn compose_catalog(builtin: &[Model], catalogs: &[Arc<dyn DynamicCatalog>]) 
         }
         match catalogs.iter().find(|catalog| catalog.provider_id() == provider) {
             Some(catalog) => {
-                let own: Vec<Model> = builtin.iter().filter(|model| model.provider == provider).cloned().collect();
+                let own = builtin.iter().filter(|model| model.provider == provider).cloned().collect();
                 composed.extend(catalog.compose(own));
                 done.insert(provider);
             }
@@ -61,18 +61,11 @@ pub fn compose_catalog(builtin: &[Model], catalogs: &[Arc<dyn DynamicCatalog>]) 
 /// A registry of [`compose_catalog`] with `models.json` applied. An unreadable or invalid file
 /// leaves the composed catalog and is returned as the error.
 pub fn build_registry(
-    builtin: &[Model],
+    builtin: &[Arc<Model>],
     catalogs: &[Arc<dyn DynamicCatalog>],
     models_json: Option<&Path>,
 ) -> (ModelRegistry, Option<ModelsFileError>) {
-    let mut registry = ModelRegistry::default();
-    for model in compose_catalog(builtin, catalogs) {
-        registry.upsert(model);
-    }
-    let Some(path) = models_json else { return (registry, None) };
-    let mut applied = registry.clone();
-    match applied.apply_models_file(path) {
-        Ok(()) => (applied, None),
-        Err(error) => (registry, Some(error)),
-    }
+    let mut registry = ModelRegistry::from_models(compose_catalog(builtin, catalogs));
+    let error = models_json.and_then(|path| registry.apply_models_file(path).err());
+    (registry, error)
 }

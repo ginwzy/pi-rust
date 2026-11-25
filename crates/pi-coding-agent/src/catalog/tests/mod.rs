@@ -69,13 +69,13 @@ pub(crate) fn model_json(provider: &str, id: &str) -> Value {
         "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 1000, "maxTokens": 100})
 }
 
-pub(crate) fn ids(models: &[Model]) -> Vec<&str> {
-    models.iter().map(|model| model.id.as_str()).collect()
+pub(crate) fn ids<T: std::borrow::Borrow<Model>>(models: &[T]) -> Vec<&str> {
+    models.iter().map(|model| model.borrow().id.as_str()).collect()
 }
 
 struct FixedCatalog {
     id: &'static str,
-    models: Vec<Model>,
+    models: Vec<std::sync::Arc<Model>>,
 }
 
 #[async_trait]
@@ -84,7 +84,7 @@ impl DynamicCatalog for FixedCatalog {
         self.id
     }
 
-    fn compose(&self, builtin: Vec<Model>) -> Vec<Model> {
+    fn compose(&self, builtin: Vec<std::sync::Arc<Model>>) -> Vec<std::sync::Arc<Model>> {
         merge_models(builtin, &self.models)
     }
 
@@ -95,16 +95,18 @@ impl DynamicCatalog for FixedCatalog {
 
 #[test]
 fn compose_applies_catalogs_in_bundled_order_and_appends_new_providers() {
-    let builtin = vec![model("a", "a1"), model("b", "b1"), model("a", "a2"), model("c", "c1")];
+    let builtin = [model("a", "a1"), model("b", "b1"), model("a", "a2"), model("c", "c1")].map(std::sync::Arc::new);
     let mut replaced = model("a", "a1");
     replaced.name = "A1 remote".into();
     let catalogs: Vec<std::sync::Arc<dyn DynamicCatalog>> = vec![
-        std::sync::Arc::new(FixedCatalog { id: "a", models: vec![replaced, model("a", "a3")] }),
-        std::sync::Arc::new(FixedCatalog { id: "llama.cpp", models: vec![model("llama.cpp", "local")] }),
+        std::sync::Arc::new(FixedCatalog { id: "a", models: vec![replaced.into(), model("a", "a3").into()] }),
+        std::sync::Arc::new(FixedCatalog { id: "llama.cpp", models: vec![model("llama.cpp", "local").into()] }),
     ];
     let composed = compose_catalog(&builtin, &catalogs);
     assert_eq!(ids(&composed), ["a1", "a2", "a3", "b1", "c1", "local"]);
     assert_eq!(composed[0].name, "A1 remote");
+    assert!(std::sync::Arc::ptr_eq(&composed[1], &builtin[2]));
+    assert!(std::sync::Arc::ptr_eq(&composed[3], &builtin[1]));
 }
 
 #[test]
@@ -113,21 +115,22 @@ fn registry_applies_models_json_over_the_composed_catalog() {
     let path = dir.path().join("models.json");
     std::fs::write(&path, r#"{"providers": {"a": {"modelOverrides": {"a1": {"name": "Renamed"}}}}}"#).unwrap();
     let catalogs: Vec<std::sync::Arc<dyn DynamicCatalog>> =
-        vec![std::sync::Arc::new(FixedCatalog { id: "a", models: vec![model("a", "a9")] })];
-    let (registry, error) = build_registry(&[model("a", "a1")], &catalogs, Some(&path));
+        vec![std::sync::Arc::new(FixedCatalog { id: "a", models: vec![model("a", "a9").into()] })];
+    let builtin = [model("a", "a1").into()];
+    let (registry, error) = build_registry(&builtin, &catalogs, Some(&path));
     assert!(error.is_none(), "{error:?}");
     assert_eq!(registry.find("a", "a1").unwrap().name, "Renamed");
     assert!(registry.find("a", "a9").is_some());
 
     std::fs::write(&path, "{ not json").unwrap();
-    let (registry, error) = build_registry(&[model("a", "a1")], &catalogs, Some(&path));
+    let (registry, error) = build_registry(&builtin, &catalogs, Some(&path));
     assert!(matches!(error, Some(pi_ai::models::ModelsFileError::Syntax { .. })));
     assert_eq!(registry.all_models().len(), 2);
 }
 
 #[test]
 fn builtin_catalogs_cover_bundled_radius_custom_radius_and_llama() {
-    let builtin = vec![model("openai", "gpt"), model("radius", "r1"), model("work", "w1")];
+    let builtin = [model("openai", "gpt"), model("radius", "r1"), model("work", "w1")].map(std::sync::Arc::new);
     let config = CatalogConfig {
         models_json: Some(
             r#"{
@@ -162,7 +165,7 @@ fn update_outcomes_match_upstream_messages() {
 
 #[test]
 fn radius_baseline_uses_bundled_models_for_the_default_gateway_only() {
-    let builtin_count = pi_ai::models::builtin_models().iter().filter(|model| model.provider == "radius").count();
+    let builtin_count = pi_ai::models::builtin_models().filter(|model| model.provider == "radius").count();
     let radius = RadiusCatalog::new("radius", None);
     assert_eq!(radius.models().len(), builtin_count);
     let custom = RadiusCatalog::new("team", Some("https://radius.pi.dev/"));

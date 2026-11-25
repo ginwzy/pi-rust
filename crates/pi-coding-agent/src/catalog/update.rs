@@ -38,7 +38,7 @@ pub struct CatalogConfig {
 /// The pi.dev overlay for every bundled provider except Radius, narrowed to the account's models
 /// where the provider lists them, the Radius gateway catalogs (built-in and `models.json`), and
 /// the llama.cpp router.
-pub fn builtin_catalogs(builtin: &[Model], config: &CatalogConfig) -> Vec<Arc<dyn DynamicCatalog>> {
+pub fn builtin_catalogs(builtin: &[Arc<Model>], config: &CatalogConfig) -> Vec<Arc<dyn DynamicCatalog>> {
     let mut providers: Vec<&str> = Vec::new();
     for model in builtin {
         if !providers.contains(&model.provider.as_str()) {
@@ -137,7 +137,7 @@ pub async fn refresh_model_catalogs(agent_dir: &Path, config: &CatalogConfig) ->
     if config.models_json.is_none() {
         config.models_json = std::fs::read_to_string(&models_json_path).ok();
     }
-    let catalogs = builtin_catalogs(pi_ai::models::builtin_models(), &config);
+    let catalogs = builtin_catalogs(pi_ai::models::builtin_model_arcs(), &config);
     let cancel = CancellationToken::new();
     let result = refresh_with_timeout(&refresher, &catalogs, true, true, MODEL_REFRESH_TIMEOUT, &cancel).await;
     update_models_outcome(&result)

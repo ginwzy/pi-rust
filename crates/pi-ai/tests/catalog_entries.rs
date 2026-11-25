@@ -10,7 +10,6 @@ use serde_json::json;
 
 fn find(provider: &str, id: &str, kind: &str) -> &'static Model {
     builtin_models()
-        .iter()
         .find(|model| model.provider == provider && model.id == id && model.model_type.as_deref() == Some(kind))
         .unwrap_or_else(|| panic!("{kind} {provider}/{id} is not in the bundled catalog"))
 }

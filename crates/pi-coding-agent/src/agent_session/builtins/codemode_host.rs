@@ -133,7 +133,6 @@ impl SessionModels {
         self.runtime
             .registry()
             .all_models()
-            .iter()
             .find(|m| m.provider == provider && m.id == id && matches(m, kind, None))
             .cloned()
     }
@@ -153,7 +152,7 @@ impl SessionModels {
 impl CodemodeModels for SessionModels {
     fn get_models_of_type(&self, kind: ModelType, provider: Option<&str>) -> Vec<Value> {
         let registry = self.runtime.registry();
-        registry.all_models().iter().filter(|model| matches(model, kind, provider)).map(to_value).collect()
+        registry.all_models().filter(|model| matches(model, kind, provider)).map(to_value).collect()
     }
 
     async fn get_available_of_type(
@@ -164,7 +163,7 @@ impl CodemodeModels for SessionModels {
     ) -> anyhow::Result<Vec<Value>> {
         let models: Vec<Model> = {
             let registry = self.runtime.registry();
-            registry.all_models().iter().filter(|model| matches(model, kind, provider)).cloned().collect()
+            registry.all_models().filter(|model| matches(model, kind, provider)).cloned().collect()
         };
         let mut available = Vec::new();
         let mut checked: Vec<(String, bool)> = Vec::new();
@@ -187,7 +186,7 @@ impl CodemodeModels for SessionModels {
 
     fn get_model_of_type(&self, kind: ModelType, provider: &str, id: &str) -> Option<Value> {
         let registry = self.runtime.registry();
-        let found = registry.all_models().iter().find(|model| model.provider == provider && model.id == id);
+        let found = registry.all_models().find(|model| model.provider == provider && model.id == id);
         found.filter(|model| matches(model, kind, None)).map(to_value)
     }
 

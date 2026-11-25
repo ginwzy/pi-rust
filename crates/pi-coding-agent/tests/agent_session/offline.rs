@@ -53,7 +53,7 @@ async fn the_default_harness_runs_on_the_faux_model() {
 
 #[test]
 fn builtin_models_are_not_offline_and_loopback_servers_are() {
-    let mut model = pi_ai::models::builtin_models().iter().find(|model| model.provider == "openai").unwrap().clone();
+    let mut model = pi_ai::models::builtin_models().find(|model| model.provider == "openai").unwrap().clone();
     assert!(!is_offline(&model), "{}", model.base_url);
     for base_url in ["http://127.0.0.1:9/v1", "http://localhost:8080", "http://[::1]:1234/v1"] {
         model.base_url = base_url.into();
@@ -68,7 +68,7 @@ fn builtin_models_are_not_offline_and_loopback_servers_are() {
 #[test]
 #[should_panic(expected = "is not served by a faux provider or a loopback server")]
 fn a_builtin_model_fails_the_offline_check() {
-    let model = pi_ai::models::builtin_models().iter().find(|model| model.provider == "anthropic").unwrap();
+    let model = pi_ai::models::builtin_models().find(|model| model.provider == "anthropic").unwrap();
     assert_offline_model(Some(model));
 }
 

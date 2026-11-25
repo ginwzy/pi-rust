@@ -19,12 +19,8 @@ fn extension_models_replace_the_provider_models() {
         "models": [{"id": "only", "name": "Only", "contextWindow": 1000, "maxTokens": 100}],
     });
     apply_extension_provider(&mut registry, "anthropic", &config, None).unwrap();
-    let models: Vec<&str> = registry
-        .all_models()
-        .iter()
-        .filter(|model| model.provider == "anthropic")
-        .map(|model| model.id.as_str())
-        .collect();
+    let models: Vec<&str> =
+        registry.all_models().filter(|model| model.provider == "anthropic").map(|model| model.id.as_str()).collect();
     assert_eq!(models, vec!["only"]);
     let model = registry.find("anthropic", "only").unwrap();
     assert_eq!((model.api.as_str(), model.base_url.as_str()), ("custom-api", "http://localhost:1"));
@@ -46,7 +42,7 @@ fn extension_definitions_are_taken_as_given_with_defaults_by_type() {
     assert_eq!((chat.context_window, chat.max_tokens), (0, 0), "no chat defaults are invented");
     assert!(chat.headers.is_empty());
     assert_eq!(registry.auth_configs()["demo"].model_headers["ext"]["x-model"], "1");
-    let image = registry.all_models().iter().find(|model| model.id == "pic").unwrap().clone();
+    let image = registry.all_models().find(|model| model.id == "pic").unwrap().clone();
     assert_eq!((image.api.as_str(), image.base_url.as_str()), ("demo-images", "http://images"));
 
     let missing = json!({"models": [{"id": "cls", "type": "classifier"}]});

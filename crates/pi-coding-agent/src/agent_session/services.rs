@@ -216,9 +216,17 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
     });
     let mut diagnostics: Vec<RuntimeDiagnostic> =
         settings.drain_errors().iter().map(|error| RuntimeDiagnostic::warning(error.diagnostic())).collect();
+    let (packages, package_diagnostics) = package_resources(&cwd, &agent_dir, &settings).await;
+    let mut loader_options = resource_loader_options(&cwd, &agent_dir, &settings, &options.resources);
+    loader_options.package_resources = packages;
+    let mut loader = ResourceLoader::new(loader_options);
+    loader.reload();
+    let llama_enabled = builtin_enabled(&loader, crate::llama::LLAMA_PROVIDER_ID);
+    let disabled = settings.global_settings().disabled_providers.unwrap_or_default();
     let model_runtime = match options.model_runtime {
         Some(runtime) => {
-            runtime.set_disabled_providers(settings.global_settings().disabled_providers.unwrap_or_default());
+            runtime.set_disabled_providers(disabled);
+            runtime.set_llama_enabled(llama_enabled).await;
             runtime
         }
         None => {
@@ -232,23 +240,20 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
             if let Some(env) = options.credential_env {
                 runtime_options.credential_env = env;
             }
-            let runtime = ModelRuntime::create(runtime_options).await;
-            runtime.set_disabled_providers(settings.global_settings().disabled_providers.unwrap_or_default());
-            runtime.enable_dynamic_catalogs(CatalogSetup::for_agent_dir(&agent_dir)).await;
+            let runtime = ModelRuntime::create_initial(
+                runtime_options,
+                disabled,
+                Some((CatalogSetup::for_agent_dir(&agent_dir), llama_enabled)),
+            )
+            .await;
             Arc::new(runtime)
         }
     };
     if let Some(error) = model_runtime.load_error() {
         diagnostics.push(RuntimeDiagnostic::warning(format!("errors loading models.json:\n{error}")));
     }
-    let (packages, package_diagnostics) = package_resources(&cwd, &agent_dir, &settings).await;
     diagnostics.extend(package_diagnostics);
-    let mut loader_options = resource_loader_options(&cwd, &agent_dir, &settings, &options.resources);
-    loader_options.package_resources = packages;
-    let mut loader = ResourceLoader::new(loader_options);
-    loader.reload();
     diagnostics.extend(resource_diagnostics(&loader));
-    model_runtime.set_llama_enabled(builtin_enabled(&loader, crate::llama::LLAMA_PROVIDER_ID)).await;
     AgentSessionServices {
         cwd,
         agent_dir,

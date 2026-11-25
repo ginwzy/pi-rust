@@ -62,26 +62,20 @@ fn builtin_info(runner: &ExtensionRunner, name: &str) -> Result<Value, JsError> 
 }
 
 fn catalog(kind: &str, args: &Args) -> Value {
-    let models = pi_ai::models::builtin_models();
+    let mut models = pi_ai::models::builtin_models();
     match kind {
         "model" => {
             let (provider, id) = (args.opt_str(1), args.opt_str(2));
-            json!(
-                models
-                    .iter()
-                    .find(|model| Some(&model.provider) == provider.as_ref() && Some(&model.id) == id.as_ref())
-            )
+            json!(models.find(|model| Some(&model.provider) == provider.as_ref() && Some(&model.id) == id.as_ref()))
         }
         "models" => {
             let provider = args.opt_str(1);
-            let models: Vec<_> = models
-                .iter()
-                .filter(|model| provider.as_ref().is_none_or(|wanted| &model.provider == wanted))
-                .collect();
+            let models: Vec<_> =
+                models.filter(|model| provider.as_ref().is_none_or(|wanted| &model.provider == wanted)).collect();
             json!(models)
         }
         _ => {
-            let mut providers: Vec<&str> = models.iter().map(|model| model.provider.as_str()).collect();
+            let mut providers: Vec<&str> = models.map(|model| model.provider.as_str()).collect();
             providers.dedup();
             providers.sort_unstable();
             providers.dedup();

@@ -41,7 +41,7 @@ fn failing() -> Personalize {
 }
 
 fn catalog(server: &TestServer, personalize: Personalize) -> PersonalizedCatalog {
-    PersonalizedCatalog::new(PROVIDER, vec![model(PROVIDER, "static")], personalize)
+    PersonalizedCatalog::new(PROVIDER, vec![model(PROVIDER, "static").into()], personalize)
         .with_catalog(Some(&server.url), None)
         .with_client(client())
 }
@@ -50,6 +50,27 @@ fn image(id: &str) -> Model {
     let mut image = model(PROVIDER, id);
     image.model_type = Some("image".into());
     image
+}
+
+#[tokio::test]
+async fn refresh_and_offline_restore_share_unchanged_bundled_models() {
+    let server = TestServer::start(|_| TestReply::status(404, "")).await;
+    let bundled = Arc::new(model(PROVIDER, "static"));
+    let provider = || {
+        PersonalizedCatalog::new(PROVIDER, vec![bundled.clone()], keep(&["static"], &Arc::default()))
+            .with_catalog(Some(&server.url), None)
+            .with_client(client())
+    };
+    let online = provider();
+    let publisher = RecordingPublisher::new(None);
+    refresh_with(&online, &publisher, Some(&key("k")), true, false).await.unwrap();
+    assert!(Arc::ptr_eq(&online.compose(Vec::new())[0], &bundled));
+    let cached = publisher.stored().expect("personalized list was saved");
+    let offline = provider();
+    let publisher = RecordingPublisher::new(Some(cached));
+    refresh_with(&offline, &publisher, None, false, false).await.unwrap();
+    assert!(Arc::ptr_eq(&offline.compose(Vec::new())[0], &bundled));
+    assert_eq!(server.requests().len(), 1);
 }
 
 #[tokio::test]
@@ -74,12 +95,12 @@ async fn restores_a_saved_list_as_is_and_falls_back_to_the_bundled_models_only_w
     // Older versions saved an empty list after a missing pi.dev catalog; only such an entry is empty.
     let publisher = RecordingPublisher::new(Some(ModelsStoreEntry { checked_at: Some(1), ..Default::default() }));
     refresh_with(&provider, &publisher, None, false, false).await.unwrap();
-    assert_eq!(ids(&provider.compose(vec![model(PROVIDER, "static")])), ["static"]);
+    assert_eq!(ids(&provider.compose(vec![model(PROVIDER, "static").into()])), ["static"]);
 
     // A key that may use no chat models keeps its image models and shows no chat models.
     let publisher = RecordingPublisher::new(Some(ModelsStoreEntry::with_models(vec![image("flux")])));
     refresh_with(&provider, &publisher, None, false, false).await.unwrap();
-    assert_eq!(ids(&provider.compose(vec![model(PROVIDER, "static")])), ["flux"]);
+    assert_eq!(ids(&provider.compose(vec![model(PROVIDER, "static").into()])), ["flux"]);
     assert!(server.requests().is_empty());
 }
 
@@ -92,7 +113,7 @@ async fn personalizes_the_bundled_and_newer_pi_dev_catalog_and_saves_the_result(
     refresh_with(&provider, &publisher, Some(&key("sk-test")), true, false).await.unwrap();
 
     assert_eq!(*seen.lock().unwrap(), ["key=sk-test", "static", "remote"]);
-    assert_eq!(ids(&provider.compose(vec![model(PROVIDER, "static")])), ["remote"]);
+    assert_eq!(ids(&provider.compose(vec![model(PROVIDER, "static").into()])), ["remote"]);
     let stored = publisher.stored().unwrap();
     assert_eq!(ids(&stored.models), ["remote"]);
     assert!(stored.checked_at.is_some() && stored.last_modified.is_none() && stored.etag.is_none());
@@ -131,7 +152,8 @@ async fn openrouter_lists_the_keys_models_from_the_configured_base_url() {
         _ => TestReply::status(404, ""),
     })
     .await;
-    let builtin = vec![model("openrouter", "allowed"), model("openrouter", "blocked"), model("openai", "gpt")];
+    let builtin =
+        [model("openrouter", "allowed"), model("openrouter", "blocked"), model("openai", "gpt")].map(Arc::new);
     let models_json = json!({"providers": {"openrouter": {"baseUrl": format!("{}/api/v1", server.url)}}});
     let config = CatalogConfig {
         catalog_base_url: Some(server.url.clone()),
@@ -163,7 +185,7 @@ async fn an_unmatched_list_shows_the_catalog_and_keeps_the_saved_list() {
         seen.lock().unwrap().push(context.default_model);
         Box::pin(async move { Ok(Personalized::Unmatched(catalog)) })
     });
-    let builtin = vec![model("anthropic", "claude-opus-4-8"), model("anthropic", "claude-haiku-4-5")];
+    let builtin = vec![model("anthropic", "claude-opus-4-8").into(), model("anthropic", "claude-haiku-4-5").into()];
     let provider = PersonalizedCatalog::new("anthropic", builtin, unmatched)
         .with_catalog(Some(&server.url), None)
         .with_client(client())
@@ -185,7 +207,7 @@ async fn an_unmatched_list_shows_the_catalog_and_keeps_the_saved_list() {
 async fn a_list_saved_by_another_version_waits_for_a_refresh() {
     let server = TestServer::start(|_| TestReply::status(404, "")).await;
     let seen = Arc::default();
-    let builtin = vec![model(PROVIDER, "static"), model(PROVIDER, "new")];
+    let builtin = vec![model(PROVIDER, "static").into(), model(PROVIDER, "new").into()];
     let provider = PersonalizedCatalog::new(PROVIDER, builtin, keep(&["static"], &seen))
         .with_catalog(Some(&server.url), None)
         .with_client(client())

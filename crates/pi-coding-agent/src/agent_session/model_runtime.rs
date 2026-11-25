@@ -71,10 +71,16 @@ pub(super) fn write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
 impl ModelRuntime {
     /// Load `models.json` (errors are kept as [`Self::load_error`]) and find configured providers.
     pub async fn create(options: ModelRuntimeOptions) -> Self {
-        let (mut registry, error) = ModelRegistry::load_lenient(&options.models_path);
         let agent_dir = options.models_path.parent().unwrap_or_else(|| Path::new("."));
-        let disabled: HashSet<String> = crate::settings::disabled_providers(agent_dir).into_iter().collect();
-        registry.retain_models(|model| !disabled.contains(&model.provider));
+        let disabled = crate::settings::disabled_providers(agent_dir);
+        Self::create_initial(options, disabled, None).await
+    }
+
+    pub(super) async fn create_initial(
+        options: ModelRuntimeOptions,
+        disabled: Vec<String>,
+        catalogs: Option<(super::runtime_catalog::CatalogSetup, bool)>,
+    ) -> Self {
         let runtime_store = Arc::new(RuntimeCredentialStore::new(options.credentials));
         let builtin = options.oauth.unwrap_or_else(|| Arc::new(|_: &str| None));
         let extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>> = Arc::default();
@@ -82,14 +88,13 @@ impl ModelRuntime {
         let oauth: OAuthLookup =
             Arc::new(move |provider: &str| read(&registered).get(provider).cloned().or_else(|| builtin(provider)));
         let resolver = Arc::new(AuthResolver::new(runtime_store.clone(), oauth).with_env(options.credential_env));
-        resolver.set_provider_configs(registry.auth_configs());
-        let runtime = Self {
-            registry: RwLock::new(registry),
-            disabled_providers: RwLock::new(disabled),
+        let mut runtime = Self {
+            registry: RwLock::default(),
+            disabled_providers: RwLock::new(disabled.into_iter().collect()),
             resolver,
             runtime_store,
             models_path: options.models_path,
-            load_error: error.map(|error| error.to_string()),
+            load_error: None,
             configured: RwLock::default(),
             virtual_models: RwLock::default(),
             catalogs: RwLock::default(),
@@ -99,7 +104,25 @@ impl ModelRuntime {
             extension_hooks: RwLock::default(),
             offline_refreshes: OfflineRefreshes::default(),
         };
-        runtime.refresh_configured_providers().await;
+        let error = if let Some((setup, llama_enabled)) = catalogs {
+            let llama = llama_enabled.then(|| Arc::new(crate::llama::LlamaProvider::new()));
+            if llama.is_some() {
+                runtime.register_provider_auth(
+                    crate::llama::LLAMA_PROVIDER_ID,
+                    Some(Arc::new(super::runtime_catalog::LlamaAuth)),
+                );
+            }
+            runtime.install_catalogs(setup, llama);
+            runtime
+                .refresh_catalogs_result(crate::catalog::RefreshOptions { allow_network: false, ..Default::default() })
+                .await
+                .1
+        } else {
+            let error = runtime.rebuild_registry();
+            runtime.refresh_configured_providers().await;
+            error
+        };
+        runtime.load_error = error.map(|error| error.to_string());
         runtime
     }
 

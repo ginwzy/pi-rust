@@ -31,7 +31,7 @@ async fn refresh(overlay: &RemoteCatalogOverlay, publisher: &RecordingPublisher,
 }
 
 fn composed(overlay: &RemoteCatalogOverlay) -> Vec<String> {
-    overlay.compose(vec![model("test-provider", "static")]).into_iter().map(|model| model.id).collect()
+    overlay.compose(vec![model("test-provider", "static").into()]).iter().map(|model| model.id.clone()).collect()
 }
 
 #[tokio::test]

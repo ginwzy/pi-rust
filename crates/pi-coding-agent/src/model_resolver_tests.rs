@@ -384,11 +384,11 @@ fn default_model_selection_follows_upstream_priority() {
     assert_eq!(default_model_for("ant-ling"), Some("Ring-2.6-1T"));
     assert_eq!(default_model_for("github-copilot"), Some("gpt-6.1-sol"));
     // Every provider's default must be in the catalog.
-    let chat = pi_ai::models::builtin_models().iter().filter(|model| pi_ai::models::is_chat_model(model));
+    let chat = pi_ai::models::builtin_models().filter(|model| pi_ai::models::is_chat_model(model));
     let mut absent = std::collections::BTreeSet::new();
     for provider in chat.map(|model| model.provider.as_str()) {
         let default = default_model_for(provider).unwrap_or_else(|| panic!("{provider} has no default"));
-        if !pi_ai::models::builtin_models().iter().any(|m| m.provider == provider && m.id == default) {
+        if !pi_ai::models::builtin_models().any(|m| m.provider == provider && m.id == default) {
             absent.insert(format!("{provider}/{default}"));
         }
     }

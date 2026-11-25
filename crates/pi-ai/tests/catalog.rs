@@ -81,7 +81,7 @@ fn extra_models() -> Vec<Value> {
 fn upstream_models() -> Vec<&'static Model> {
     let extra: Vec<String> =
         extra_models().iter().filter_map(|model| model["provider"].as_str().map(str::to_string)).collect();
-    builtin_models().iter().filter(|model| !extra.contains(&model.provider)).collect()
+    builtin_models().filter(|model| !extra.contains(&model.provider)).collect()
 }
 
 fn bundled_counts() -> Counts {
@@ -95,7 +95,6 @@ fn bundled_counts() -> Counts {
 
 fn find(provider: &str, id: &str) -> &'static Model {
     builtin_models()
-        .iter()
         .find(|model| model.provider == provider && model.id == id)
         .unwrap_or_else(|| panic!("{provider}/{id} is not in the bundled catalog"))
 }
@@ -149,7 +148,7 @@ fn image_models_deserialize_with_output_modalities() {
     assert_eq!(image.context_window, 0);
     let resize = image.input_limits.and_then(|limits| limits.images).and_then(|images| images.resize).unwrap();
     assert_eq!((resize.max_width, resize.max_bytes, resize.jpeg_quality), (Some(2000), Some(4_718_592), Some(80)));
-    for model in builtin_models().iter().filter(|model| model.model_type.as_deref() == Some("image")) {
+    for model in builtin_models().filter(|model| model.model_type.as_deref() == Some("image")) {
         let output = model.output.as_deref().unwrap_or_default();
         assert!(output.iter().any(|kind| kind == "image"), "{}/{} has output {output:?}", model.provider, model.id);
     }
@@ -167,7 +166,7 @@ fn classifier_models_deserialize_with_context_window_and_cost() {
     assert_eq!(classifier.cost.tiers[0].input_tokens_above, 272_000);
     let typesafe = find("typesafe", "jev-latest");
     assert_eq!((typesafe.api.as_str(), typesafe.context_window), ("typesafe-system-one", 64_000));
-    for model in builtin_models().iter().filter(|model| model.model_type.as_deref() == Some("classifier")) {
+    for model in builtin_models().filter(|model| model.model_type.as_deref() == Some("classifier")) {
         assert!(model.context_window > 0 && model.output.is_none(), "{}/{}", model.provider, model.id);
     }
 }
@@ -176,13 +175,12 @@ fn classifier_models_deserialize_with_context_window_and_cost() {
 fn chat_models_outside_azure_have_a_base_url() {
     // Azure resolves its endpoint from the resource name at runtime, so upstream ships it empty.
     let missing: Vec<String> = builtin_models()
-        .iter()
         .filter(|model| model.model_type.as_deref() == Some("chat") && model.provider != "azure")
         .filter(|model| model.base_url.is_empty())
         .map(|model| format!("{}/{}", model.provider, model.id))
         .collect();
     assert!(missing.is_empty(), "chat models without baseUrl: {missing:?}");
-    assert!(builtin_models().iter().any(|model| model.provider == "azure"));
+    assert!(builtin_models().any(|model| model.provider == "azure"));
 }
 
 #[test]

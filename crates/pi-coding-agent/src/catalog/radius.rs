@@ -2,7 +2,7 @@
 //! baseline once known, since organization owners can disable models (upstream
 //! `ai/src/providers/radius.ts`).
 
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use pi_ai::Model;
@@ -22,8 +22,8 @@ pub const RADIUS_PROVIDER_ID: &str = "radius";
 pub struct RadiusCatalog {
     provider_id: String,
     gateway: String,
-    baseline: Vec<Model>,
-    dynamic: RwLock<Option<Vec<Model>>>,
+    baseline: Vec<Arc<Model>>,
+    dynamic: RwLock<Option<Vec<Arc<Model>>>>,
 }
 
 impl RadiusCatalog {
@@ -32,8 +32,17 @@ impl RadiusCatalog {
         let provider_id = provider_id.into();
         let gateway = normalize_radius_gateway_url(gateway.unwrap_or(DEFAULT_RADIUS_GATEWAY));
         let baseline = if gateway == normalize_radius_gateway_url(DEFAULT_RADIUS_GATEWAY) {
-            let bundled = pi_ai::models::builtin_models().iter().filter(|model| model.provider == RADIUS_PROVIDER_ID);
-            bundled.map(|model| Model { provider: provider_id.clone(), ..model.clone() }).collect()
+            pi_ai::models::builtin_model_arcs()
+                .iter()
+                .filter(|model| model.provider == RADIUS_PROVIDER_ID)
+                .map(|model| {
+                    if model.provider == provider_id {
+                        model.clone()
+                    } else {
+                        Arc::new(Model { provider: provider_id.clone(), ..(**model).clone() })
+                    }
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -46,12 +55,17 @@ impl RadiusCatalog {
 
     /// The gateway catalog when known, else the baseline.
     pub fn models(&self) -> Vec<Model> {
+        self.model_arcs().into_iter().map(|m| (*m).clone()).collect()
+    }
+
+    fn model_arcs(&self) -> Vec<Arc<Model>> {
         let dynamic = self.dynamic.read().unwrap_or_else(|poisoned| poisoned.into_inner());
         dynamic.clone().unwrap_or_else(|| self.baseline.clone())
     }
 
     fn set_dynamic(&self, models: Vec<Model>) {
-        *self.dynamic.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(models);
+        *self.dynamic.write().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some(pi_ai::models::into_model_arcs(models));
     }
 }
 
@@ -61,8 +75,8 @@ impl DynamicCatalog for RadiusCatalog {
         &self.provider_id
     }
 
-    fn compose(&self, _builtin: Vec<Model>) -> Vec<Model> {
-        self.models()
+    fn compose(&self, _builtin: Vec<Arc<Model>>) -> Vec<Arc<Model>> {
+        self.model_arcs()
     }
 
     async fn refresh(&self, context: &RefreshContext<'_>) -> anyhow::Result<()> {

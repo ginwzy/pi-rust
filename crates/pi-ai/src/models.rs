@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use crate::auth::ProviderAuthConfig;
 use crate::env::get_env_api_key;
@@ -14,18 +14,32 @@ mod json;
 
 /// `models.json` is generated from the upstream catalog; `models.extra.json` holds the providers
 /// only pi-rust has, so regenerating the first keeps them.
-static BUILTIN: LazyLock<Vec<Model>> = LazyLock::new(|| {
+static BUILTIN: LazyLock<Vec<Arc<Model>>> = LazyLock::new(|| {
     let mut models: Vec<Model> =
         serde_json::from_str(include_str!("../models.json")).expect("bundled models.json is valid");
     let extra: Vec<Model> =
         serde_json::from_str(include_str!("../models.extra.json")).expect("bundled models.extra.json is valid");
     models.extend(extra);
-    models
+    into_model_arcs(models)
 });
 
+/// Wrap owned models in `Arc` without reusing the larger `Vec<Model>` buffer in place.
+pub fn into_model_arcs(models: Vec<Model>) -> Vec<Arc<Model>> {
+    let mut arcs = Vec::with_capacity(models.len());
+    for model in models {
+        arcs.push(Arc::new(model));
+    }
+    arcs
+}
+
 /// Models shipped with this crate.
-pub fn builtin_models() -> &'static [Model] {
+pub fn builtin_model_arcs() -> &'static [Arc<Model>] {
     &BUILTIN
+}
+
+/// Models shipped with this crate, without the owning handles.
+pub fn builtin_models() -> impl ExactSizeIterator<Item = &'static Model> + Clone {
+    BUILTIN.iter().map(Arc::as_ref)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,7 +87,7 @@ pub fn provider_base_urls(text: &str) -> HashMap<String, String> {
 /// Available models and the `models.json` auth settings per provider.
 #[derive(Clone, Debug, Default)]
 pub struct ModelRegistry {
-    models: Vec<Model>,
+    models: Vec<Arc<Model>>,
     auth_configs: HashMap<String, ProviderAuthConfig>,
     provider_names: HashMap<String, String>,
     /// Providers known to have usable auth; replaces the key heuristic when set.
@@ -85,7 +99,24 @@ pub struct ModelRegistry {
 impl ModelRegistry {
     /// The bundled catalog only.
     pub fn builtin() -> Self {
-        Self { models: builtin_models().to_vec(), ..Self::default() }
+        Self { models: builtin_model_arcs().to_vec(), ..Self::default() }
+    }
+
+    /// Bulk upsert in catalog order: the last value replaces a duplicate in its original slot.
+    pub fn from_models(models: Vec<Arc<Model>>) -> Self {
+        let mut slots = HashMap::with_capacity(models.len());
+        let mut unique = Vec::with_capacity(models.len());
+        for model in &models {
+            let key = model_key(model);
+            let len = unique.len();
+            let slot = *slots.entry(key).or_insert(len);
+            if slot == len {
+                unique.push(Arc::clone(model));
+            } else {
+                unique[slot] = Arc::clone(model);
+            }
+        }
+        Self { models: unique, ..Self::default() }
     }
 
     /// The bundled catalog plus `path` when it exists.
@@ -121,13 +152,15 @@ impl ModelRegistry {
         let file = json::parse_models_file(text)?;
         let mut models = self.models.clone();
         let mut auth_configs = self.auth_configs.clone();
+        // Validate every provider on staged data before mutating the registry.
         for (provider, config) in &file.providers {
-            let (own, rest): (Vec<Model>, Vec<Model>) =
-                models.into_iter().partition(|model| &model.provider == provider);
+            let (own, rest): (Vec<_>, Vec<_>) = models.into_iter().partition(|model| &model.provider == provider);
             let applied = json::apply_provider(provider, own, config)?;
             models = rest;
             models.extend(applied);
             auth_configs.insert(provider.clone(), json::auth_config(config));
+        }
+        for (provider, config) in &file.providers {
             if let Some(overrides) = config.model_overrides.as_ref().filter(|overrides| !overrides.is_empty()) {
                 self.model_overrides.insert(provider.clone(), overrides.clone());
             }
@@ -142,11 +175,9 @@ impl ModelRegistry {
 
     /// Add `model`, replacing one with the same provider, id, and type (a chat model and a
     /// classifier may share an id).
-    pub fn upsert(&mut self, model: Model) {
-        let kind = |model: &Model| model.model_type.clone().unwrap_or_else(|| "chat".into());
-        let same = |existing: &Model| {
-            existing.provider == model.provider && existing.id == model.id && kind(existing) == kind(&model)
-        };
+    pub fn upsert(&mut self, model: impl Into<Arc<Model>>) {
+        let model = model.into();
+        let same = |existing: &Model| model_key(existing) == model_key(&model);
         match self.models.iter_mut().find(|existing| same(existing)) {
             Some(existing) => *existing = model,
             None => self.models.push(model),
@@ -155,13 +186,13 @@ impl ModelRegistry {
 
     /// Every model of `provider`, of every type, in catalog order.
     pub fn provider_models(&self, provider: &str) -> Vec<Model> {
-        self.models.iter().filter(|model| model.provider == provider).cloned().collect()
+        self.models.iter().filter(|model| model.provider == provider).map(|model| (**model).clone()).collect()
     }
 
     /// Replace the models of `provider` with `models`.
     pub fn replace_provider_models(&mut self, provider: &str, models: Vec<Model>) {
         self.models.retain(|model| model.provider != provider);
-        self.models.extend(models);
+        self.models.extend(models.into_iter().map(Arc::new));
     }
 
     /// Apply the `models.json` `modelOverrides` of `provider` to its models, each type taking the
@@ -171,7 +202,7 @@ impl ModelRegistry {
         let Some(overrides) = self.model_overrides.get(provider) else { return Ok(()) };
         for (id, patch) in overrides {
             for model in self.models.iter_mut().filter(|model| model.provider == provider && &model.id == id) {
-                *model = json::apply_override(model, patch)
+                json::apply_override(model, patch)
                     .map_err(|error| format!("Provider {provider}, model {id}: {error}"))?;
             }
         }
@@ -194,18 +225,23 @@ impl ModelRegistry {
     }
 
     /// Every model, including image and classifier models.
-    pub fn all_models(&self) -> &[Model] {
+    pub fn all_model_arcs(&self) -> &[Arc<Model>] {
         &self.models
+    }
+
+    /// Every model, including image and classifier models.
+    pub fn all_models(&self) -> impl ExactSizeIterator<Item = &Model> + Clone {
+        self.models.iter().map(Arc::as_ref)
     }
 
     /// Chat models.
     pub fn models(&self) -> Vec<&Model> {
-        self.models.iter().filter(|model| is_chat_model(model)).collect()
+        self.all_models().filter(|model| is_chat_model(model)).collect()
     }
 
     /// Chat models whose provider has configured auth.
     pub fn available_models(&self) -> Vec<&Model> {
-        self.models.iter().filter(|model| is_chat_model(model) && self.has_api_key(&model.provider)).collect()
+        self.all_models().filter(|model| is_chat_model(model) && self.has_api_key(&model.provider)).collect()
     }
 
     /// Distinct provider ids in catalog order.
@@ -236,7 +272,7 @@ impl ModelRegistry {
 
     /// The chat model `provider`/`id`.
     pub fn find(&self, provider: &str, id: &str) -> Option<&Model> {
-        self.models.iter().find(|model| model.provider == provider && model.id == id && is_chat_model(model))
+        self.all_models().find(|model| model.provider == provider && model.id == id && is_chat_model(model))
     }
 
     /// `models.json` auth settings per provider, for [`crate::auth::AuthResolver`].
@@ -253,8 +289,7 @@ impl ModelRegistry {
             _ => (provider, pattern),
         };
         let candidates: Vec<&Model> = self
-            .models
-            .iter()
+            .all_models()
             .filter(|model| is_chat_model(model) && provider.is_none_or(|provider| model.provider == provider))
             .collect();
         if let Some(model) = candidates.iter().find(|model| model.id == pattern) {
@@ -304,6 +339,10 @@ pub fn resolve_config_value(value: &str) -> Option<String> {
 /// Whether `model` is a chat model (no `type`, or `chat`), as opposed to image or classifier models.
 pub fn is_chat_model(model: &Model) -> bool {
     model.model_type.as_deref().is_none_or(|kind| kind == "chat")
+}
+
+fn model_key(model: &Model) -> (&str, &str, &str) {
+    (&model.provider, &model.id, model.model_type.as_deref().unwrap_or("chat"))
 }
 
 pub use crate::simple_options::{clamp_thinking_level, supported_thinking_levels};

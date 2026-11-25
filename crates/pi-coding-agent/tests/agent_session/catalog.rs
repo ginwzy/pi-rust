@@ -42,6 +42,18 @@ async fn start(dir: &std::path::Path, catalog_url: &str) -> Arc<ModelRuntime> {
 }
 
 #[tokio::test]
+async fn independent_session_catalogs_keep_the_same_bundled_handles() {
+    let dir = tempfile::tempdir().unwrap();
+    let left = start(dir.path(), "http://127.0.0.1:1").await;
+    let right = start(dir.path(), "http://127.0.0.1:1").await;
+    let left = left.registry();
+    let right = right.registry();
+    assert!(left.all_model_arcs().len() > 700);
+    assert_eq!(left.all_model_arcs().len(), right.all_model_arcs().len());
+    assert!(left.all_model_arcs().iter().zip(right.all_model_arcs()).all(|(a, b)| Arc::ptr_eq(a, b)));
+}
+
+#[tokio::test]
 async fn startup_restores_the_offline_cache_and_refreshes_from_the_catalog() {
     let dir = tempfile::tempdir().unwrap();
     let cached = json!({"openai": {"models": [model_json("openai", "gpt-cached")], "checkedAt": 1, "lastModified": 1}});

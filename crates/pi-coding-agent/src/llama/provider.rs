@@ -3,7 +3,7 @@
 //! `extensions/llama/provider.ts`).
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use pi_ai::Model;
@@ -134,8 +134,8 @@ pub fn to_chat_model(
 
 #[derive(Default)]
 struct Catalog {
-    chat: Vec<Model>,
-    classifiers: Vec<Model>,
+    chat: Vec<Arc<Model>>,
+    classifiers: Vec<Arc<Model>>,
 }
 
 /// The llama.cpp router provider. It has no bundled models and stays empty until configured.
@@ -156,7 +156,10 @@ impl LlamaProvider {
     }
 
     fn set(&self, chat: Vec<Model>, classifiers: Vec<Model>) {
-        *self.catalog.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Catalog { chat, classifiers };
+        *self.catalog.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Catalog {
+            chat: pi_ai::models::into_model_arcs(chat),
+            classifiers: pi_ai::models::into_model_arcs(classifiers),
+        };
     }
 
     /// Replace the models from a router catalog (as `/llama` does after loads and unloads).
@@ -173,13 +176,19 @@ impl LlamaProvider {
 
     /// Chat models for `/model`.
     pub fn models(&self) -> Vec<Model> {
-        self.catalog.read().unwrap_or_else(|poisoned| poisoned.into_inner()).chat.clone()
+        self.catalog
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .chat
+            .iter()
+            .map(|m| (**m).clone())
+            .collect()
     }
 
     /// Chat models followed by classifiers.
     pub fn all_models(&self) -> Vec<Model> {
         let catalog = self.catalog.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-        catalog.chat.iter().chain(&catalog.classifiers).cloned().collect()
+        catalog.chat.iter().chain(&catalog.classifiers).map(|m| (**m).clone()).collect()
     }
 
     fn client(&self, server_url: &str, api_key: Option<String>) -> anyhow::Result<LlamaClient> {
@@ -201,8 +210,9 @@ impl DynamicCatalog for LlamaProvider {
         LLAMA_PROVIDER_ID
     }
 
-    fn compose(&self, _builtin: Vec<Model>) -> Vec<Model> {
-        self.all_models()
+    fn compose(&self, _builtin: Vec<Arc<Model>>) -> Vec<Arc<Model>> {
+        let catalog = self.catalog.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        catalog.chat.iter().chain(&catalog.classifiers).cloned().collect()
     }
 
     async fn refresh(&self, context: &RefreshContext<'_>) -> anyhow::Result<()> {

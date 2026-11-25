@@ -35,7 +35,7 @@ pub struct GitHubCopilotOAuth {
 impl Default for GitHubCopilotOAuth {
     fn default() -> Self {
         let known_model: KnownModel = Arc::new(|id| {
-            crate::models::builtin_models().iter().any(|model| model.provider == "github-copilot" && model.id == id)
+            crate::models::builtin_models().any(|model| model.provider == "github-copilot" && model.id == id)
         });
         Self { hooks: Hooks::default(), known_model }
     }

@@ -2,6 +2,8 @@
 //! pi.dev catalog) to the models the credential may use and saves the result, which then replaces
 //! the catalog, offline too (upstream `withPersonalizedCatalog`).
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -27,6 +29,18 @@ fn is_overlay_entry(entry: &ModelsStoreEntry) -> bool {
     entry.last_modified.is_some() || entry.etag.is_some()
 }
 
+fn intern_models<'a>(base: &[Arc<Model>], models: impl IntoIterator<Item = Cow<'a, Model>>) -> Vec<Arc<Model>> {
+    let base: HashMap<_, _> =
+        base.iter().map(|model| ((model.id.as_str(), model.model_type.as_deref()), model)).collect();
+    models
+        .into_iter()
+        .map(|model| match base.get(&(model.id.as_str(), model.model_type.as_deref())) {
+            Some(handle) if handle.as_ref() == model.as_ref() => Arc::clone(handle),
+            _ => Arc::new(model.into_owned()),
+        })
+        .collect()
+}
+
 fn is_this_version(entry: &ModelsStoreEntry) -> bool {
     entry.pi_version.as_deref() == Some(VERSION)
 }
@@ -42,7 +56,7 @@ pub fn account_model_list(provider_id: &str) -> Option<(Personalize, Option<i64>
 
 pub struct PersonalizedCatalog {
     provider_id: String,
-    builtin: Vec<Model>,
+    builtin: Vec<Arc<Model>>,
     personalize: Personalize,
     catalog_base_url: String,
     local_generated_at: Option<i64>,
@@ -50,12 +64,12 @@ pub struct PersonalizedCatalog {
     interval: Option<i64>,
     client: reqwest::Client,
     list_client: reqwest::Client,
-    personal: RwLock<Vec<Model>>,
+    personal: RwLock<Vec<Arc<Model>>>,
 }
 
 impl PersonalizedCatalog {
     /// `builtin` holds the provider's bundled models.
-    pub fn new(provider_id: impl Into<String>, builtin: Vec<Model>, personalize: Personalize) -> Self {
+    pub fn new(provider_id: impl Into<String>, builtin: Vec<Arc<Model>>, personalize: Personalize) -> Self {
         Self {
             provider_id: provider_id.into(),
             builtin,
@@ -105,10 +119,11 @@ impl PersonalizedCatalog {
     /// The saved list, or the bundled models while it is empty.
     pub fn models(&self) -> Vec<Model> {
         let personal = self.personal.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if personal.is_empty() { self.builtin.clone() } else { personal.clone() }
+        let models = if personal.is_empty() { self.builtin.as_slice() } else { personal.as_slice() };
+        models.iter().map(|m| (**m).clone()).collect()
     }
 
-    fn set_personal(&self, models: Vec<Model>) {
+    fn set_personal(&self, models: Vec<Arc<Model>>) {
         *self.personal.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = models;
     }
 
@@ -123,13 +138,15 @@ impl PersonalizedCatalog {
     /// The saved list. pi-rust's lists read an entry of the plain overlay as an overlay, and
     /// skip a list saved by another pi version, whose catalog differs, until a refresh replaces
     /// it. Upstream restores every entry as it is.
-    fn restore(&self, stored: Option<&ModelsStoreEntry>) -> Vec<Model> {
+    fn restore(&self, stored: Option<&ModelsStoreEntry>) -> Vec<Arc<Model>> {
         let models = match stored {
             Some(entry) if self.interval.is_some() && is_overlay_entry(entry) => {
-                merge_models(self.builtin.clone(), &remote_models(Some(entry), self.local_generated_at))
+                let remote = remote_models(Some(entry), self.local_generated_at);
+                let remote = intern_models(&self.builtin, remote.into_iter().map(Cow::Owned));
+                merge_models(self.builtin.clone(), &remote)
             }
             Some(entry) if self.interval.is_some() && !is_this_version(entry) => Vec::new(),
-            Some(entry) => entry.models.clone(),
+            Some(entry) => intern_models(&self.builtin, entry.models.iter().map(Cow::Borrowed)),
             None => Vec::new(),
         };
         models.into_iter().filter(|model| model.provider == self.provider_id).collect()
@@ -158,7 +175,7 @@ impl DynamicCatalog for PersonalizedCatalog {
         &self.provider_id
     }
 
-    fn compose(&self, builtin: Vec<Model>) -> Vec<Model> {
+    fn compose(&self, builtin: Vec<Arc<Model>>) -> Vec<Arc<Model>> {
         let personal = self.personal.read().unwrap_or_else(|poisoned| poisoned.into_inner());
         if personal.is_empty() { builtin } else { personal.clone() }
     }
@@ -190,7 +207,9 @@ impl DynamicCatalog for PersonalizedCatalog {
                 remote = catalog.models;
             }
         }
-        let catalog = merge_models(self.builtin.clone(), &remote);
+        let remote = pi_ai::models::into_model_arcs(remote);
+        let shared = merge_models(self.builtin.clone(), &remote);
+        let catalog = shared.iter().map(|model| (**model).clone()).collect();
         let personalized = (self.personalize)(catalog, self.list_context(context)).await.map_err(anyhow::Error::msg)?;
         if context.cancel.is_cancelled() {
             return Ok(());
@@ -207,7 +226,7 @@ impl DynamicCatalog for PersonalizedCatalog {
             Personalized::Unmatched(catalog) => (Persist::Unchanged, catalog),
         };
         if context.publisher.publish(persist).await {
-            self.set_personal(models);
+            self.set_personal(intern_models(&shared, models.into_iter().map(Cow::Owned)));
         }
         Ok(())
     }

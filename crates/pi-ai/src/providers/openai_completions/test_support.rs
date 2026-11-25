@@ -48,7 +48,6 @@ pub(super) fn system(value: Value) -> Message {
 /// A bundled catalog model.
 pub(super) fn catalog(provider: &str, id: &str) -> Model {
     builtin_models()
-        .iter()
         .find(|model| model.provider == provider && model.id == id)
         .cloned()
         .unwrap_or_else(|| panic!("catalog model {provider}/{id}"))

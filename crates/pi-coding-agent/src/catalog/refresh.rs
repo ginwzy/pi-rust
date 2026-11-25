@@ -53,7 +53,7 @@ pub trait DynamicCatalog: Send + Sync {
     fn provider_id(&self) -> &str;
 
     /// The provider's models of every type, given its built-in models.
-    fn compose(&self, builtin: Vec<Model>) -> Vec<Model>;
+    fn compose(&self, builtin: Vec<Arc<Model>>) -> Vec<Arc<Model>>;
 
     /// Restore `context.stored` and, when allowed, fetch a newer list. On failure the earlier
     /// list stays.
