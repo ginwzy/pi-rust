@@ -10,7 +10,8 @@ use futures::FutureExt;
 use tokio_util::sync::CancellationToken;
 
 use super::resolve_value::{
-    config_value_env_var_names, is_command_config_value, resolve_config_value_or_err, resolve_headers_or_err,
+    config_value_env_var_names, is_command_config_value, resolve_config_value_or_err_async,
+    resolve_headers_or_err_async,
 };
 use super::{
     ApiKeyCredential, AuthError, AuthResult, AuthType, Credential, CredentialStore, ModelAuth, OAuthAuth,
@@ -197,7 +198,7 @@ impl AuthResolver {
         let api_key_auth = self.has_api_key_auth(provider_id, &config);
         if let Some(key) = overrides.api_key.clone().filter(|_| api_key_auth) {
             let credential = ApiKeyCredential { key: Some(key), env: overrides.env.clone() };
-            return self.resolve_api_key(provider_id, &config, Some(&credential), overrides.env.as_ref());
+            return self.resolve_api_key(provider_id, &config, Some(&credential), overrides.env.as_ref()).await;
         }
         let stored = self.store.read(provider_id).await?;
         match stored {
@@ -207,10 +208,10 @@ impl AuthResolver {
             },
             Some(Credential::ApiKey(mut credential)) if api_key_auth => {
                 credential.env = merged_env(credential.env.as_ref(), overrides.env.as_ref());
-                self.resolve_api_key(provider_id, &config, Some(&credential), overrides.env.as_ref())
+                self.resolve_api_key(provider_id, &config, Some(&credential), overrides.env.as_ref()).await
             }
             Some(_) => Ok(None),
-            None if api_key_auth => self.resolve_api_key(provider_id, &config, None, overrides.env.as_ref()),
+            None if api_key_auth => self.resolve_api_key(provider_id, &config, None, overrides.env.as_ref()).await,
             None => Ok(None),
         }
     }
@@ -227,13 +228,13 @@ impl AuthResolver {
         if let Some(headers) = config.model_headers.get(model_id) {
             let env = merged_env(resolved.env.as_ref(), overrides.env.as_ref());
             let description = format!("model \"{provider_id}/{model_id}\"");
-            let headers = resolve_headers_or_err(headers, &description, env.as_ref(), &*self.env);
+            let headers = resolve_headers_or_err_async(headers, &description, env.as_ref(), &*self.env).await;
             resolved.auth.headers.extend(headers.map_err(AuthError::Other)?);
         }
         Ok(Some(resolved))
     }
 
-    fn resolve_api_key(
+    async fn resolve_api_key(
         &self,
         provider_id: &str,
         config: &ProviderAuthConfig,
@@ -247,7 +248,8 @@ impl AuthResolver {
             (Some(credential), _) => credential.key.clone().map(|key| stored(key, credential.env.clone())),
             (None, Some(raw)) => {
                 let description = format!("API key for provider \"{provider_id}\"");
-                let key = resolve_config_value_or_err(raw, &description, env, base).map_err(AuthError::Other)?;
+                let key =
+                    resolve_config_value_or_err_async(raw, &description, env, base).await.map_err(AuthError::Other)?;
                 let mut resolved =
                     builtin_resolve(provider_id, Some(&ApiKeyCredential { key: Some(key), env: None }), env, base);
                 if let Some(resolved) = resolved.as_mut() {
@@ -260,11 +262,11 @@ impl AuthResolver {
         };
         let Some(mut result) = result else { return Ok(None) };
         let header_env = merged_env(credential.and_then(|credential| credential.env.as_ref()), result.env.as_ref());
-        self.apply_config_headers(provider_id, config, &mut result.auth, header_env.as_ref().or(env))?;
+        self.apply_config_headers(provider_id, config, &mut result.auth, header_env.as_ref().or(env)).await?;
         Ok(Some(result))
     }
 
-    fn apply_config_headers(
+    async fn apply_config_headers(
         &self,
         provider_id: &str,
         config: &ProviderAuthConfig,
@@ -272,7 +274,7 @@ impl AuthResolver {
         env: Option<&ProviderEnv>,
     ) -> AuthResult<()> {
         let description = format!("provider \"{provider_id}\"");
-        let headers = resolve_headers_or_err(&config.headers, &description, env, &*self.env);
+        let headers = resolve_headers_or_err_async(&config.headers, &description, env, &*self.env).await;
         auth.headers.extend(headers.map_err(AuthError::Other)?);
         if config.auth_header {
             let key = auth.api_key.clone().ok_or_else(|| AuthError::other("authHeader requires a resolved API key"))?;
@@ -304,7 +306,7 @@ impl AuthResolver {
         let mut auth = oauth.to_auth(&credential);
         let env: Option<ProviderEnv> =
             credential.extra.get("env").and_then(|env| serde_json::from_value(env.clone()).ok());
-        self.apply_config_headers(provider_id, config, &mut auth, env.as_ref())?;
+        self.apply_config_headers(provider_id, config, &mut auth, env.as_ref()).await?;
         Ok(Some(ResolvedAuth { auth, env: None, source: Some("OAuth".into()) }))
     }
 

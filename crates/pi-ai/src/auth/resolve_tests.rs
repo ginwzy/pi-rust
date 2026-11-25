@@ -146,6 +146,22 @@ async fn models_json_headers_resolve_templates_and_auth_header() {
     assert_eq!(resolved.auth.headers["Authorization"], "Bearer sk-local");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn stored_command_key_and_command_headers_resolve_for_one_request() {
+    let resolver = AuthResolver::without_oauth(store(vec![("local", key("!printf ' test-key '"))]));
+    let config = ProviderAuthConfig {
+        headers: [("X-Provider".into(), "!printf provider".into())].into(),
+        model_headers: [("tiny".into(), [("X-Model".into(), "!printf model".into())].into())].into(),
+        ..Default::default()
+    };
+    resolver.set_provider_configs([("local".into(), config)].into());
+    let resolved = resolver.resolve_for_model("local", "tiny", &AuthOverrides::default()).await.unwrap().unwrap();
+    assert_eq!(resolved.auth.api_key.as_deref(), Some("test-key"));
+    assert_eq!(resolved.auth.headers["X-Provider"], "provider");
+    assert_eq!(resolved.auth.headers["X-Model"], "model");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn expiring_oauth_tokens_refresh_once_and_persist() {
     let expired = OAuthCredential { refresh: "r".into(), access: "old".into(), expires: 0, ..Default::default() };

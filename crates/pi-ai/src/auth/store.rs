@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
-use super::resolve_value::{is_command_config_value, resolve_config_value};
+use super::resolve_value::{is_command_config_value, resolve_config_value_async};
 use super::store_lock::FileLock;
 use super::{ApiKeyCredential, AuthError, AuthResult, AuthType, Credential, CredentialInfo, CredentialStore, UpdateFn};
 
@@ -70,12 +70,12 @@ fn credential_info(provider_id: &str, value: &Value) -> Option<CredentialInfo> {
 }
 
 /// Resolve a stored key (`$VAR`, `!command`) with the credential's own `env` first.
-fn resolve_stored_key(credential: Credential, run_commands: bool) -> Credential {
+async fn resolve_stored_key(credential: Credential, run_commands: bool) -> Credential {
     match credential {
         Credential::ApiKey(ApiKeyCredential { key: Some(key), env })
             if run_commands || !is_command_config_value(&key) =>
         {
-            let key = resolve_config_value(&key, env.as_ref());
+            let key = resolve_config_value_async(&key, env.as_ref()).await;
             Credential::ApiKey(ApiKeyCredential { key, env })
         }
         other => other,
@@ -175,7 +175,7 @@ impl CredentialStore for FileCredentialStore {
     async fn read(&self, provider_id: &str) -> AuthResult<Option<Credential>> {
         let data = self.load()?;
         let Some(value) = data.get(provider_id) else { return Ok(None) };
-        Ok(Some(resolve_stored_key(parse_credential(provider_id, value)?, !self.read_only)))
+        Ok(Some(resolve_stored_key(parse_credential(provider_id, value)?, !self.read_only).await))
     }
 
     async fn list(&self) -> AuthResult<Vec<CredentialInfo>> {
@@ -222,7 +222,10 @@ impl InMemoryCredentialStore {
 impl CredentialStore for InMemoryCredentialStore {
     async fn read(&self, provider_id: &str) -> AuthResult<Option<Credential>> {
         let credential = self.credentials.lock().await.get(provider_id).cloned();
-        Ok(credential.map(|credential| resolve_stored_key(credential, true)))
+        match credential {
+            Some(credential) => Ok(Some(resolve_stored_key(credential, true).await)),
+            None => Ok(None),
+        }
     }
 
     async fn list(&self) -> AuthResult<Vec<CredentialInfo>> {

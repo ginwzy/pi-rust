@@ -182,15 +182,38 @@ fn execute_command_uncached(command: &str) -> Option<String> {
         }
     };
     let output = reader.join().unwrap_or_default();
-    let text = String::from_utf8_lossy(&output).trim().to_string();
-    (status?.success() && !text.is_empty()).then_some(text)
+    if !status?.success() {
+        return None;
+    }
+    command_output(&output)
 }
 
-fn execute_command(config: &str) -> Option<String> {
-    if let Some(cached) = COMMAND_CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(config) {
-        return cached.clone();
+async fn execute_command_async(command: &str) -> Option<String> {
+    let child = tokio::process::Command::from(shell_command(command))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .ok()?;
+    let output = tokio::time::timeout(COMMAND_TIMEOUT, child.wait_with_output()).await.ok()?.ok()?;
+    if !output.status.success() {
+        return None;
     }
-    let result = execute_command_uncached(&config[1..]);
+    command_output(&output.stdout)
+}
+
+fn command_output(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn cached_command(config: &str) -> Option<Option<String>> {
+    COMMAND_CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(config).cloned()
+}
+
+fn remember_command(config: &str, result: Option<String>) -> Option<String> {
     COMMAND_CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(config.to_string(), result.clone());
     result
 }
@@ -199,8 +222,18 @@ fn execute_command(config: &str) -> Option<String> {
 /// too); `$NAME` and `${NAME}` interpolate, with `env` winning over the process environment;
 /// `$$` and `$!` escape. Returns `None` when a command fails or a variable is unset.
 pub fn resolve_config_value(config: &str, env: Option<&ProviderEnv>) -> Option<String> {
-    if is_command_config_value(config) {
-        return execute_command(config);
+    if let Some(command) = config.strip_prefix('!') {
+        return cached_command(config).unwrap_or_else(|| remember_command(config, execute_command_uncached(command)));
+    }
+    resolve_template(&parse_template(config), env, &ProcessEnv)
+}
+
+pub(super) async fn resolve_config_value_async(config: &str, env: Option<&ProviderEnv>) -> Option<String> {
+    if let Some(command) = config.strip_prefix('!') {
+        if let Some(cached) = cached_command(config) {
+            return cached;
+        }
+        return remember_command(config, execute_command_async(command).await);
     }
     resolve_template(&parse_template(config), env, &ProcessEnv)
 }
@@ -225,16 +258,30 @@ pub fn resolve_config_value_or_err(
     env: Option<&ProviderEnv>,
     base: &dyn EnvLookup,
 ) -> Result<String, String> {
-    if let Some(value) = resolve_uncached(config, env, base) {
-        return Ok(value);
-    }
+    resolve_uncached(config, env, base).ok_or_else(|| resolution_error(config, description, env, base))
+}
+
+pub(super) async fn resolve_config_value_or_err_async(
+    config: &str,
+    description: &str,
+    env: Option<&ProviderEnv>,
+    base: &dyn EnvLookup,
+) -> Result<String, String> {
+    let value = match config.strip_prefix('!') {
+        Some(command) => execute_command_async(command).await,
+        None => resolve_template(&parse_template(config), env, base),
+    };
+    value.ok_or_else(|| resolution_error(config, description, env, base))
+}
+
+fn resolution_error(config: &str, description: &str, env: Option<&ProviderEnv>, base: &dyn EnvLookup) -> String {
     if let Some(command) = config.strip_prefix('!') {
-        return Err(format!("Failed to resolve {description} from shell command: {command}"));
+        return format!("Failed to resolve {description} from shell command: {command}");
     }
     match missing_env_var_names(config, env, base).as_slice() {
-        [name] => Err(format!("Failed to resolve {description} from environment variable: {name}")),
-        [] => Err(format!("Failed to resolve {description}")),
-        names => Err(format!("Failed to resolve {description} from environment variables: {}", names.join(", "))),
+        [name] => format!("Failed to resolve {description} from environment variable: {name}"),
+        [] => format!("Failed to resolve {description}"),
+        names => format!("Failed to resolve {description} from environment variables: {}", names.join(", ")),
     }
 }
 
@@ -264,6 +311,21 @@ pub fn resolve_headers_or_err(
         .collect()
 }
 
+pub(super) async fn resolve_headers_or_err_async(
+    headers: &BTreeMap<String, String>,
+    description: &str,
+    env: Option<&ProviderEnv>,
+    base: &dyn EnvLookup,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut resolved = BTreeMap::new();
+    for (name, value) in headers {
+        let value =
+            resolve_config_value_or_err_async(value, &format!("{description} header \"{name}\""), env, base).await?;
+        resolved.insert(name.clone(), value);
+    }
+    Ok(resolved)
+}
+
 /// Forget cached command results.
 pub fn clear_config_value_cache() {
     COMMAND_CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
@@ -291,8 +353,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn commands_trim_output_cache_results_and_report_failures() {
+    #[tokio::test]
+    async fn commands_trim_output_cache_results_and_report_failures() {
         assert_eq!(resolve_config_value("!echo '  spaced-key  '", None).as_deref(), Some("spaced-key"));
         assert_eq!(resolve_config_value("!printf 'line1\\nline2'", None).as_deref(), Some("line1\nline2"));
         for failing in ["!exit 1", "!nonexistent-command-12345", "!printf ''"] {
@@ -303,7 +365,7 @@ mod tests {
         let counter = dir.join("counter");
         std::fs::write(&counter, "0").unwrap();
         let command = format!("!count=$(cat '{0}'); echo $((count + 1)) > '{0}'; echo value", counter.display());
-        assert_eq!(resolve_config_value(&command, None).as_deref(), Some("value"));
+        assert_eq!(resolve_config_value_async(&command, None).await.as_deref(), Some("value"));
         assert_eq!(resolve_config_value(&command, None).as_deref(), Some("value"));
         assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "1");
         assert_eq!(resolve_config_value_uncached(&command, None).as_deref(), Some("value"));

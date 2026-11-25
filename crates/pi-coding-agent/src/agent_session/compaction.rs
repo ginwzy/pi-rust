@@ -104,10 +104,10 @@ impl AgentSession {
         source: SummarizationSource,
     ) -> anyhow::Result<(Model, SummarizationOptions)> {
         let (model, thinking_level) = self.summary_model(model, &cancel).await?;
-        if let Err(message) = request_auth(self.model_runtime(), &model).await
-            && !self.has_custom_stream_fn()
-        {
-            anyhow::bail!(message);
+        match cancel.run_until_cancelled(request_auth(self.model_runtime(), &model)).await {
+            None => anyhow::bail!("Summarization cancelled"),
+            Some(Err(message)) if !self.has_custom_stream_fn() => anyhow::bail!(message),
+            Some(_) => {}
         }
         let options = SummarizationOptions {
             cancel,

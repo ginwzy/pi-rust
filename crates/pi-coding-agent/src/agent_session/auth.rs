@@ -165,8 +165,9 @@ pub fn auth_stream_fn(
                 }
             }
             let mut observers = None;
-            let mut upstream = match request_auth(&runtime, &model).await {
-                Ok(request) => {
+            let auth = options.cancel.run_until_cancelled(request_auth(&runtime, &model)).await;
+            let mut upstream = match auth {
+                Some(Ok(request)) => {
                     apply_request_settings(&mut options, &request, &settings);
                     super::extension_hooks::apply_header_hooks(&hooks, &mut options).await;
                     observers = super::extension_hooks::install_request_observers(&hooks, &mut options);
@@ -175,7 +176,8 @@ pub fn auth_stream_fn(
                         None => pi_ai::stream(&request.model, &context, options),
                     }
                 }
-                Err(message) => error_stream(&model, StopReason::Error, message),
+                Some(Err(message)) => error_stream(&model, StopReason::Error, message),
+                None => error_stream(&model, StopReason::Aborted, "Request aborted"),
             };
             while let Some(event) = upstream.next().await {
                 if let Some(observers) = &observers {
